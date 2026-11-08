@@ -49,8 +49,10 @@ try{
   await page.locator('#planner-input').fill('모델 설정 전에는 작업을 보내지 마세요');
   assert.equal(await page.locator('#start-workflow').isEnabled(),true);
   await page.locator('#start-workflow').click();
+  await page.locator('.request-alert').waitFor();
   assert.match(await page.locator('#request-alerts').innerText(),/AI 역할 변경.*Cursor.*모델/s);
   await page.waitForTimeout(2000);await page.locator('#start-workflow').click();
+  await page.waitForFunction(()=>document.querySelectorAll('.request-alert').length===2);
   assert.equal(await page.locator('.request-alert').count(),2);
   await page.screenshot({path:join(artifacts,'request-readiness.png')});
   assert.equal((await page.evaluate(id=>window.tower.workflow(id),id)).value,null);
