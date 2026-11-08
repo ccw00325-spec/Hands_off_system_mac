@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {requireTools,requiredTools} from '../src/core/prerequisites.js';
+import {requireTools,requiredTools,Prerequisites} from '../src/core/prerequisites.js';
 
 const report=(state,optional='missing')=>({rows:[{id:'node',label:'Node.js 24+ · npm',required:true,state},{id:'gemini',label:'Gemini CLI',required:false,state:optional}],needsAttention:false});
 test('every non-ready required tool blocks the action even if cached attention flag says ready',async()=>{
@@ -23,4 +23,11 @@ test('a failed or malformed scan never dispatches and required tool selection st
  for(const scan of [async()=>{throw new Error('probe failed');},async()=>null,async()=>({})])await assert.rejects(()=>requireTools(scan,()=>calls++));
  const first=report('ready'),second={rows:[{id:'claude',label:'Claude Code',required:true,state:'missing'}]};
  await requireTools(async()=>first,()=>calls++);await assert.rejects(()=>requireTools(async()=>second,()=>calls++),/Claude/);assert.equal(calls,1);
+});
+
+test('host-mode admission never probes an unused Docker daemon or optional Git',async()=>{
+ const check=new Prerequisites({node:async()=>process.execPath,find:async()=>assert.fail('Optional probes must not delay work'),probe:async()=>({code:0,output:'v24.0.0'})});
+ check.current={rows:[{id:'git',state:'ready',version:'2.50.0'},{id:'docker',state:'not-running'}]};
+ const report=await check.scan({gpt:{installed:true}},{providers:['gpt'],executionBackend:'host',requiredOnly:true});
+ assert.equal(requiredTools(report).length,0);assert.equal(report.rows.find(row=>row.id==='git').state,'ready');assert.equal(report.rows.find(row=>row.id==='docker').cached,true);
 });

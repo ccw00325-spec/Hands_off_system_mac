@@ -40,8 +40,10 @@ export function probeTool(executable, args, timeout = 5000) {
 
 export class Prerequisites {
   constructor({ find = findExecutable, node = nodeRuntime, probe = probeTool } = {}) { Object.assign(this, { find, node, probe }); this.current = null; }
-  async scan(status, { providers = ['gpt', 'grok', 'claude'], executionBackend = 'docker', dockerImage = 'node:24-bookworm-slim' } = {}) {
-    const [node, git, docker] = await Promise.all([this.node(), this.find('git'), this.find('docker')]);
+  async scan(status, { providers = ['gpt', 'grok', 'claude'], executionBackend = 'docker', dockerImage = 'node:24-bookworm-slim', requiredOnly = false } = {}) {
+    const checkDocker = !requiredOnly || executionBackend === 'docker';
+    const previous = new Map((this.current?.rows ?? []).map(row => [row.id,row]));
+    const [node, git, docker] = await Promise.all([this.node(), requiredOnly ? null : this.find('git'), checkDocker ? this.find('docker') : null]);
     const gitStub = process.platform === 'darwin' && git === '/usr/bin/git' && (await this.probe('/usr/bin/xcode-select', ['-p'])).code !== 0;
     const [nodeInfo, gitInfo, dockerInfo] = await Promise.all([
       node ? this.probe(node, ['--version']) : null,
@@ -66,6 +68,12 @@ export class Prerequisites {
       })[id] + (providers.includes(id) ? ' 현재 팀에서 사용하므로 설치가 필요합니다.' : ' 현재 팀에서 사용하지 않으므로 선택입니다.'), version: status?.[id]?.version ?? null,
       ...(status?.[id]?.installState ? { state: status[id].installState } : {}) })),
     ];
+    // Work admission checks required tools freshly. Optional tool discovery is
+    // kept in the setup scan so a stopped, unused Docker daemon cannot delay it.
+    for (const id of requiredOnly ? ['git', ...(!checkDocker ? ['docker'] : [])] : []) {
+      const row=rows.find(row=>row.id===id), old=previous.get(id);
+      row.state=old?.state??'unknown';row.version=old?.version??null;row.cached=true;
+    }
     this.current = { checkedAt: new Date().toISOString(), platform: process.platform, arch: process.arch, rows, needsAttention: rows.some(row => row.required && row.state !== 'ready') };
     return structuredClone(this.current);
   }

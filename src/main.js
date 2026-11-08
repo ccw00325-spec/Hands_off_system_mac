@@ -293,14 +293,14 @@ async function prepareStartup() {
     prerequisites: tools,
   };
 }
-async function scanPrerequisites(current, settings, projectData, projectId = projectData.activeId) {
+async function scanPrerequisites(current, settings, projectData, projectId = projectData.activeId, requiredOnly = false) {
   prerequisiteSource = current.gpt?.source ?? prerequisiteSource;
   const active = projectId;
   const team = active ? await roles.getTeam(active) : [];
   const providers = team.length ? [...new Set(team.map(row => row.provider))].filter(id => id !== 'gpt' || prerequisiteSource !== 'api') : undefined;
-  return { ...await prerequisites.scan({ ...current, gpt: current.codex }, { providers, executionBackend: settings.executionBackend, dockerImage:settings.dockerImage }), projectId: active };
+  return { ...await prerequisites.scan({ ...current, gpt: current.codex }, { providers, executionBackend: settings.executionBackend, dockerImage:settings.dockerImage, requiredOnly }), projectId: active };
 }
-async function passivePrerequisites(tools, projectId) {
+async function passivePrerequisites(tools, projectId, requiredOnly = false) {
   prerequisiteSource = (await store.read('execution-config', {})).gptSource ?? prerequisiteSource;
   if (!tools) {
     const team = await roles.getTeam(projectId);
@@ -317,7 +317,7 @@ async function passivePrerequisites(tools, projectId) {
     return [id, { installed: true, installState: check.code === 0 ? 'ready' : 'unknown', version: check.output.match(/\d+\.\d+(?:\.\d+)?/)?.[0] ?? null }];
   })));
   const before = prerequisites.current;
-  const result = await scanPrerequisites({ ...presence, codex: presence.gpt, gpt: { source: prerequisiteSource } }, await preferences.get(), await projects.list(), projectId);
+  const result = await scanPrerequisites({ ...presence, codex: presence.gpt, gpt: { source: prerequisiteSource } }, await preferences.get(), await projects.list(), projectId, requiredOnly);
   for (const id of Object.keys(finders)) if (result.rows.some(row => row.id === id && row.state === 'ready') && before?.rows.find(row => row.id === id)?.state !== 'ready') {
     const connection = id === 'gpt' ? codex : id === 'grok' ? grok.connection : id === 'claude' ? claude : gemini;
     connection.cache = null; void refreshCatalog(id, true);
@@ -400,7 +400,7 @@ function handle(channel, action) {
     try {
       if (requiredToolActions.has(channel)) {
         projects.find(await projects.list(), args[0]);
-        await requireTools(() => passivePrerequisites(undefined, args[0]));
+        await requireTools(() => passivePrerequisites(undefined, args[0], true));
       }
       return { ok: true, value: await action(...args) };
     } catch (error) {
