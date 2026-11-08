@@ -174,6 +174,8 @@ export class CodexConnection {
     });
     return this.connecting;
   }
+  async freshStatus(){const probe=new CodexConnection(this.directory,()=>{},{find:this.find,rpcFactory:this.rpcFactory});this.statusProbes??=new Set();this.statusProbes.add(probe);try{const value=await probe.status({force:true});this.cache={at:Date.now(),value};return value;}finally{probe.rpc?.close();this.statusProbes.delete(probe);}}
+  closeStatusProbes(){for(const probe of this.statusProbes??[])probe.rpc?.close();this.statusProbes?.clear();}
   async status({ force = false } = {}) {
     if (!force && this.cache && Date.now() - this.cache.at < 30000)
       return { ...this.cache.value, login: this.login.state() };

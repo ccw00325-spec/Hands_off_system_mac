@@ -234,9 +234,9 @@ export class GeminiConnection {
   emit(state, message) {
     this.notify({ type: "gemini", state, message, login: this.loginState() });
   }
-  async connect() {
+  async connect({forceLogin=false}={}) {
     if (this.active) throw new Error("Google 로그인이 진행 중입니다.");
-    if ((await this.status()).connected)
+    if (!forceLogin && (await this.status({force:true})).connected)
       return {
         reused: true,
         connected: true,

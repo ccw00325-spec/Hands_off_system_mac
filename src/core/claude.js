@@ -50,15 +50,15 @@ export class ClaudeConnection {
         clearTimeout(timer);
         resolve({ installed: true, connected: false, state: "unknown" });
       });
-      child.once("close", () => {
+      child.once("close", (code) => {
         clearTimeout(timer);
         try {
           const status = JSON.parse(output);
           // Return only safe status fields. Credentials remain under the official CLI's control.
           resolve({
             installed: true,
-            connected: status.loggedIn === true,
-            state: status.loggedIn === true ? "connected" : "disconnected",
+            connected: code === 0 && status.loggedIn === true,
+            state: code === 0 && status.loggedIn === true ? "connected" : "disconnected",
             method: String(status.authMethod || ""),
             label: String(status.email || "Claude Code"),
           });

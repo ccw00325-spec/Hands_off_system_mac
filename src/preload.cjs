@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld(
   "tower",
   Object.freeze({
     status: call("status"),
+    checkConnections: call("check-connections"),
     startup: call('startup'),
     startupState: call('startup-state'),
     startupReady: call('startup-ready'),

@@ -1,3 +1,4 @@
+import {recoveryActions} from './auth-recovery.js';
 import { PROVIDERS, CAPABILITIES, teamFor } from "../core/team.js";
 import { agentRows } from "./desk-state.js";
 import { providerIcon } from "./provider-icon.js";
@@ -9,7 +10,7 @@ const node = (tag, text, cls) => {
   if (cls) item.className = cls;
   return item;
 };
-export function createAgentDesk({ onAction }) {
+export function createAgentDesk({ onAction,onLogin,onChange }) {
   let input = {},
     signature = "",
     context = "",
@@ -345,11 +346,10 @@ export function createAgentDesk({ onAction }) {
                   "desk-fallback-tag",
                 ),
               );
-            else
-              identity.append(
+            identity.append(
                 node(
                   "span",
-                  agent.connected ? "연결됨" : "연결 필요",
+                  agent.connected ? (agent.provider==='grok'?"Cursor 로그인됨":"연결됨") : "연결 확인 필요",
                   agent.connected ? "desk-connected" : "desk-disconnected",
                 ),
               );
@@ -385,6 +385,7 @@ export function createAgentDesk({ onAction }) {
                   "desk-backup-hint",
                 ),
               );
+            if(!agent.connected)history.prepend(recoveryActions(agent,{login:onLogin,change:onChange}));
             card.append(identity, history);
             return card;
           }),

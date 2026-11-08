@@ -41,6 +41,7 @@ jobs:
       - run: node scripts/check-role-review-ui.mjs
       - run: node scripts/check-visual-review.mjs
       - run: node scripts/check-setup-engineering-ui.mjs
+      - run: node scripts/check-auth-recovery.mjs
       - run: node scripts/check-modern-preview.mjs
       - run: npm run package:win -- --config.compression=store
       - run: pwsh -NoProfile -File scripts/check-packaged-startup.ps1 -Portable
@@ -65,6 +66,7 @@ jobs:
             artifacts/four-panel-review.png
             artifacts/visual-review-ui.png
             artifacts/setup-connected.png
+            artifacts/auth-disconnected.png
             artifacts/preview-settings.png
             artifacts/modern-*.png
             artifacts/modern-preview-debug.json
@@ -100,6 +102,7 @@ jobs:
       - run: node scripts/check-role-review-ui.mjs
       - run: node scripts/check-visual-review.mjs
       - run: node scripts/check-setup-engineering-ui.mjs
+      - run: node scripts/check-auth-recovery.mjs
       - run: node scripts/check-modern-preview.mjs
       - run: npm run package:mac -- --${{ matrix.arch }} --config.compression=store
       - run: node scripts/verify-package.mjs --mac --arch=${{ matrix.arch }}
@@ -128,6 +131,7 @@ jobs:
             artifacts/four-panel-review.png
             artifacts/visual-review-ui.png
             artifacts/setup-connected.png
+            artifacts/auth-disconnected.png
             artifacts/preview-settings.png
             artifacts/modern-*.png
             artifacts/modern-preview-debug.json

@@ -6,7 +6,7 @@ import {
   SLOT_IDS,
   exclusiveTeam,
 } from "./team.js";
-import { isQuotaExhausted } from "./provider-errors.js";
+import { isQuotaExhausted,isAuthenticationFailure } from "./provider-errors.js";
 import { remainingQuota, replacementCandidates } from "./quota-routing.js";
 export const DEFAULT_ROLES = Object.freeze({
   gpt: "gpt",
@@ -90,7 +90,7 @@ export class RoleAssignments {
 // Keep existing task owner IDs stable for persisted runs; route by frozen role assignment.
 export function roleProviders(
   providers,
-  { getUsage = () => null, confirmCursorUI = async () => false } = {},
+  { getUsage = () => null, confirmCursorUI = async () => false,onAuthenticationFailure=()=>{},assertAuthentication=()=>{} } = {},
 ) {
   const routeKey = (agent) => agent.provider + ":" + (agent.modelId ?? "");
   const usageSnapshot = async (options) => {
@@ -217,6 +217,7 @@ export function roleProviders(
       agent = teamFor(options).find((row) => row.id === role);
       attempted.add(routeKey(agent));
       await authorize(role, action, context, agent);
+      await assertAuthentication(agent.provider,options);
       await options.onProviderAttempt?.({
         actor: role,
         provider: agent.provider,
@@ -229,6 +230,7 @@ export function roleProviders(
           options: agentOptions(options, role),
         });
       } catch (error) {
+        if(isAuthenticationFailure(error))await onAuthenticationFailure(agent.provider,context.options);
         if (context.signal?.aborted || !isQuotaExhausted(error)) throw error;
         if (options.autoFallback === true) {
           options.exhaustedProviders ??= [];
@@ -259,6 +261,7 @@ export function roleProviders(
               agentOptions(options, role),
             );
           } catch (error) {
+            if(isAuthenticationFailure(error))await onAuthenticationFailure(agent.provider,options);
             if (!isQuotaExhausted(error)) throw error;
             options.team ??= defaultTeam(options.roles);
             if (options.autoFallback === true) {

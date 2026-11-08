@@ -1,3 +1,5 @@
+import {mergeConnectionStatus} from './connection-state.js';
+import {recoveryActions} from './auth-recovery.js';
 import {
   conversationTree,
   terminalFeed,
@@ -106,7 +108,7 @@ const setupView=createSetupView({
  model:id=>{const control=$('#'+id+'-model')??$('#'+(id==='gpt'?'codex':id)+'-login');control?.scrollIntoView({block:'center'});control?.focus();},
  saveTeam:async team=>{if(team.some(a=>a.provider==='grok'&&a.roles.includes('ui'))&&!await call(api.confirmCursorUIRole()))throw new Error('UI 구현 담당을 다른 AI로 선택하세요.');teamConfig=await call(api.setTeam(projectData.activeId,team));renderAssignedRoles();},close:()=>closePrerequisites(),
 });
-desk = createAgentDesk({ onAction: missionAction });
+desk = createAgentDesk({ onAction: missionAction,onLogin:recoverLogin,onChange:changeDisconnectedAI });
 notifications = createNotifications(api, handleNotification);
 const advancedView=createAdvancedView({api,call,projectId:()=>projectData?.activeId,currentRun:()=>currentRun,notice:toast});
 createGuide(missionAction);
@@ -275,12 +277,12 @@ function renderImage() {
   $("#image-prompt").required = !design;
 }
 async function refreshStatus(prepared) {
-  const status = prepared??await call(api.status());
+  const status = mergeConnectionStatus(connection,prepared??await call(api.status()));
   const previous=connection;
   connection = status;
   $("#app-version").textContent = `LOCAL / ${status.appVersion}`;
   const account = status.accounts.find((item) => item.active);
-  const usable = account?.planEnabled === true;
+  const usable = account?.planEnabled === true&&(status.gpt.source!=='api'||status.gpt.connected===true);
   const gptUsable = status.gpt.connected;
   pill(
     "#gpt-status",
@@ -733,6 +735,11 @@ async function initialize() {
     );
   } else {
     api.onEvent(async (event) => {
+      if(event.type==='connection-health'){
+        if(!connection||event.provider==='gpt'&&connection.gpt.source!=='api')return;const next={...connection,[event.provider]:{...connection[event.provider],...event.value}};
+        if(event.provider==='codex'&&connection.gpt.source==='codex')next.gpt={...connection.gpt,connected:event.value.connected,authRevision:event.value.authRevision};
+        await refreshStatus(next);return;
+      }
       setupView.event(event);
       if (event.type === 'answer-required') { await handleNotification(event); return; }
       if (event.type === 'system-notification-unavailable') {
@@ -1558,6 +1565,7 @@ document.addEventListener("keydown", () => {
 window.addEventListener("focus", () => {
   void noteActivity();
   void refreshUsage(false);
+  void call(api.checkConnections()).catch(()=>{});
   void prerequisiteWatcher.check();
 });
 setInterval(() => {
@@ -1626,6 +1634,7 @@ function renderAssignedRoles() {
 }
 function refreshMission() {
   const team = currentDisplayTeam();
+  renderAuthRecovery(team);
   setupView.render({report:setupReport,connection,team:teamConfig??team,projectId:projectData?.activeId});
   mission.update({
     run: currentRun, team,
@@ -1638,6 +1647,28 @@ function refreshMission() {
   desk.update({run:currentRun,team,configuredTeam:teamConfig,connections:connection??{},projectId:projectData?.activeId,conversationId:currentConversation?.id});
   mascot.update(currentRun,team);
   if (usageData) renderUsage(usageData);
+}
+function closeRecoveryContext(){if($('#agent-session-dialog').open)$('#close-agent-session').click();if($('#roles-dialog').open)$('#roles-dialog').close();}
+async function recoverLogin(actor){
+ const agent=currentDisplayTeam().find(row=>row.id===actor);if(!agent)return;
+ closeRecoveryContext();showPrerequisites(await call(api.prerequisites()),'accounts');
+ const provider=agent.provider,button=$('#'+(provider==='gpt'?(connection.gpt.source==='api'?'chatgpt':'codex'):provider)+'-login');button?.closest('section')?.scrollIntoView({block:'start'});
+ try{
+  const login=(provider==='gpt'&&connection.gpt.source==='codex'?connection.codex:connection[provider])?.login;
+  if(login?.waiting){if(login.hasBrowserLink)await call(api.loginBrowser(provider==='gpt'?'codex':provider));return;}
+  if(provider==='gpt'&&connection.gpt.source==='api'){$('#chatgpt-login').click();return;}
+  await call(({gpt:api.codexLogin,claude:api.claudeLogin,grok:api.grokLogin,gemini:api.geminiLogin})[provider](true));await refreshStatus();
+ }catch(error){toast(error.message,'error');}
+}
+function changeDisconnectedAI(actor){closeRecoveryContext();void openRoles(actor);}
+function renderAuthRecovery(team){
+ for(const agent of team){
+  const id='auth-recovery-'+agent.id;let box=document.getElementById(id);const connected=connection?.[agent.provider]?.connected===true;
+  const shortcut=agent.id==='gpt'?$('#planner-empty .connect-shortcut'):null;if(shortcut)shortcut.hidden=!connected;if(connected){box?.remove();continue;}
+  if(box?.dataset.provider!==agent.provider){box?.remove();box=recoveryActions(agent,{login:recoverLogin,change:changeDisconnectedAI});box.id=id;box.dataset.provider=agent.provider;}
+  const empty=$('#'+(agent.id==='gpt'?'planner':agent.id)+'-empty');const terminal=empty?.parentElement;if(!terminal)continue;
+  if(!empty.hidden)empty.append(box);else terminal.prepend(box);
+ }
 }
 function missionAction(target) {
   if (target === "workflow") return desk.openWorkflow();

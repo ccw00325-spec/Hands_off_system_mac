@@ -623,7 +623,7 @@ try {
   await page.locator("#back-to-controller").click();
   await page.locator("#sidebar-images").click();
   assert.equal(await page.locator("#sidebar-images").getAttribute("aria-pressed"), "true");
-  await page.locator("#image-provider").selectOption("gemini");
+  await page.evaluate(()=>window.tower.checkConnections());await page.waitForFunction(()=>window.tower.status().then(r=>r.value.gemini.connected===false));await page.locator("#image-provider").selectOption("gemini");
   await page.locator("#prerequisites-dialog[open]").waitFor();await page.locator("[data-setup-tab=accounts]").click();
   await page.locator("#gemini-auth-status").filter({ hasText: "Google 연결됨" }).waitFor();
   await page.locator("#finish-connections").click();

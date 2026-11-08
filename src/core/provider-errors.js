@@ -1,3 +1,4 @@
+export function isAuthenticationFailure(error){if(error?.authenticationRequired===true)return true;let text;try{text=JSON.stringify({code:error?.code,status:error?.status,statusCode:error?.statusCode,message:error?.message,rpcMessage:error?.rpcMessage,rpcData:error?.rpcData,error:error?.error,cliFailure:error?.is_error===true||error?.type==='error'?{result:error?.result,errors:error?.errors}:undefined});}catch{return false;}return error?.status===401||error?.statusCode===401||/invalid[_ -]api[_ -]key|unauthenticated|unauthorized|not[_ -]logged[_ -]in|authentication[_ -](?:required|failed|expired|error)|token[_ -]expired|login[_ -]required|HTTP 401/i.test(text??'');}
 // Only provider/transport error envelopes enter this classifier, never a model reply.
 export function isQuotaExhausted(error) {
   if (error?.quotaExhausted === true) return true;
@@ -52,6 +53,7 @@ export function isQuotaExhausted(error) {
   );
 }
 export function providerFailure(provider, detail, message) {
+  if(isAuthenticationFailure(detail)){const error=new Error(message||'공식 AI 로그인이 필요합니다.');error.authenticationRequired=true;error.provider=provider;return error;}
   if (!isQuotaExhausted(detail))
     return detail instanceof Error ? detail : new Error(message);
   const error = new Error(message || "AI 사용 한도를 소진했습니다.");

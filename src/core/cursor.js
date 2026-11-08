@@ -82,6 +82,7 @@ export function captureCursor(launch, args, { timeout = 15000, cwd } = {}) {
 export function parseCursorStatus(value, code = 0) {
   const connected =
     code === 0 &&
+    !['authenticated','loggedIn','isAuthenticated','isLoggedIn'].some(key=>value?.[key]===false) &&
     (value.authenticated === true ||
       value.loggedIn === true ||
       value.isAuthenticated === true ||

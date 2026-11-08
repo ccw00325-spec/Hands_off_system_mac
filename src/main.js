@@ -1,3 +1,4 @@
+import {ConnectionHealth} from './core/connection-health.js';
 import {
   app,
   BrowserWindow,
@@ -111,6 +112,7 @@ let gptRestoreState = null;
 let splash,
   catalog,
   startupPromise,
+  connectionHealth,
   mainRevealed = false,
   closingSplash = false;
 let shuttingDown=false;
@@ -351,7 +353,7 @@ function scheduleMainReveal() {
     if(splash&&!splash.isDestroyed())splash.destroy();
     window.show();
     window.focus();
-    mainRevealed = true;
+    mainRevealed = true;connectionHealth?.start();
     if (
       profileDirectory ||
       (!app.isPackaged && process.env.TOWER_TEST_USER_DATA)
@@ -386,6 +388,8 @@ const allowedLinks = {
 };
 
 function notify(value) {
+  if(['auth','codex','claude','grok','gemini'].includes(value.type)&&value.state==='connected')connectionHealth?.release(value.type==='auth'?'gpt':value.type);
+
   if (window && !window.isDestroyed())
     window.webContents.send("tower:event", value);
   if(!shuttingDown&&mainRevealed&&['auth','codex','claude','grok','gemini'].includes(value.type)&&value.state==='connected')
@@ -519,6 +523,7 @@ async function status() {
     gemini.status(),
     codex.status(),
   ]);
+  for(const [id,value]of [['claude',claudeState],['grok',grokState],['gemini',geminiState],['codex',codexState]])Object.assign(value,connectionHealth?.seed(id,value)??{});
   const execution = await store.read("execution-config", {});
   const source =
     execution.gptSource ??
@@ -546,6 +551,7 @@ async function status() {
         source === "codex"
           ? codexState.connected
           : accounts.some((account) => account.active && account.planEnabled),
+      ...(source==='api'?connectionHealth.seed('gpt',{connected:accounts.some(account=>account.active&&account.planEnabled),state:'connected'}):{}),
       modelId: execution.gptModel ?? null,
     },
     securityNotice: store.securityNotice,
@@ -695,6 +701,7 @@ else {
         grok:async()=>(await grok.status()).connected?grok.models():{rows:[],state:'login_required',message:'Cursor 로그인 후 모델을 자동으로 준비합니다.'},
         gemini:async()=>(await gemini.status()).connected?gemini.models():{rows:[],state:'login_required',message:'Google 계정 연결 후 모델을 자동으로 준비합니다.'},
       },{notify:value=>notify({type:'model-catalog',catalog:value})});
+      connectionHealth=new ConnectionHealth({gpt:async()=>{const config=await store.read('execution-config',{});if(config.gptSource&&config.gptSource!=='api'||!config.gptSource&&(await codex.status()).connected)return{connected:false,state:'not-selected'};try{await auth.access();return{connected:true,state:'connected'};}catch{return{connected:false,state:'authentication-required'};}},claude:()=>claude.status({force:true}),grok:()=>grok.status({force:true}),gemini:()=>gemini.status({force:true}),codex:()=>codex.freshStatus()},notify);
       const codexUsage = new CodexUsage((response) =>
         usage?.pushCodex(response),
       );
@@ -714,6 +721,8 @@ else {
           gemini: new GeminiProvider(gemini),
         },{
           getUsage:()=>usage.snapshot(),
+          assertAuthentication:(provider,options)=>{const id=provider==='gpt'?'codex':provider;if(provider==='gpt'&&options.gptSource==='api'){if(connectionHealth.view('gpt').connected===false)throw Object.assign(new Error('GPT API 로그인을 다시 연결하세요.'),{authenticationRequired:true});return;}const value=connectionHealth.view(id);if(value.connected===false)throw Object.assign(new Error('AI 로그인 확인이 필요합니다. 로그인 페이지로 이동하거나 AI를 바꾸세요.'),{authenticationRequired:true});},
+          onAuthenticationFailure:(provider,options)=>connectionHealth.invalidate(provider==='gpt'?(options.gptSource==='api'?'gpt':'codex'):provider),
           confirmCursorUI:async ({signal,title})=>{
             signal?.throwIfAborted();
             if(!window||window.isDestroyed())return false;
@@ -776,6 +785,7 @@ else {
       );
       session.defaultSession.setPermissionCheckHandler(() => false);
       handle("tower:status", status);
+      handle("tower:check-connections",()=>{connectionHealth.poll();return true;});
       handle('tower:startup',async()=>{
         const first=!startupPromise;startupPromise??=prepareStartup();const boot=await startupPromise;
         if(first||!mainRevealed)return boot;
@@ -897,7 +907,7 @@ else {
       );
       handle("tower:grok-models", () => catalog.rows('grok'));
       handle("tower:select-grok-model", async(modelId) => {validateModelId(modelId);if(!catalog.rows('grok').some(row=>row.id===modelId))throw new Error('준비된 Cursor 목록에서 모델을 선택하세요.');await store.write('cursor-model',{modelId});return grok.selection();});
-      handle("tower:gemini-login", () => gemini.connect());
+      handle("tower:gemini-login", (force) => gemini.connect({forceLogin:force===true}));
       handle("tower:codex-login", (force) =>
         codex.connect({ forceLogin: force === true }),
       );
@@ -909,7 +919,7 @@ else {
           value.gptSource = source;
           delete value.gptModel;
           await store.write("execution-config", value);
-          void refreshCatalog('gpt',true);
+          void refreshCatalog('gpt',true);void connectionHealth.check(source==='api'?'gpt':'codex');
           return value;
         }),
       );
@@ -1330,7 +1340,7 @@ else {
     }
   });
   app.on("before-quit", event => {
-    shuttingDown=true;
+    shuttingDown=true;connectionHealth?.stop();codex?.closeStatusProbes();
     if (pendingDiagnostics) {
       event.preventDefault();
       if (!flushingQuit) {

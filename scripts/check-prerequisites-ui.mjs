@@ -61,7 +61,7 @@ try{
  assert.deepEqual(await application.evaluate(()=>globalThis.__sites),['https://nodejs.org/en/download']);
  const invalid=await page.evaluate(()=>window.tower.openInstallSite('https://untrusted.example/install'));assert.equal(invalid.ok,false);
  checks.push('An install click opens only the fixed official URL; arbitrary installer URLs are rejected and no download script runs');
- await application.evaluate(()=>globalThis.__toolsReady=true);
+ await application.evaluate(()=>globalThis.__toolsReady=true);await page.evaluate(()=>window.tower.checkConnections());await page.waitForFunction(()=>document.querySelector('[data-setup-ai=gpt]')?.dataset.ready==='true');
  await page.locator('#continue-prerequisites').filter({hasText:'준비 완료'}).waitFor();
  await page.locator('#recheck-prerequisites').click();
  assert.match(await page.locator('[data-tool=node]').innerText(),/24.0.0/);
