@@ -9,6 +9,6 @@ export class ConnectionHealth {
  emit(id){this.notify({type:'connection-health',provider:id,value:this.view(id)});}
  check(id){if(this.pending.has(id))return this.pending.get(id);const epoch=this.epochs.get(id)??0;const task=(async()=>{let value;try{value=await this.probes[id]();if(!value||typeof value.connected!=='boolean')throw Error('Unverified login');}catch{value={connected:false,state:'verification-failed'};}if((this.epochs.get(id)??0)===epoch){this.revisions.set(id,(this.revisions.get(id)??0)+1);this.rows.set(id,{value,checkedAt:this.now()});this.emit(id);}return this.view(id);})().finally(()=>this.pending.delete(id));this.pending.set(id,task);return task;}
  poll(){for(const id of Object.keys(this.probes)){this.emit(id);void this.check(id);}}
- start(){if(!this.timer){this.timer=setInterval(()=>this.poll(),10000);this.timer.unref?.();}}
+ start(){if(!this.timer){this.poll();this.timer=setInterval(()=>this.poll(),10000);this.timer.unref?.();}}
  stop(){clearInterval(this.timer);this.timer=null;}
 }

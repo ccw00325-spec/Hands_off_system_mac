@@ -26,7 +26,7 @@ test('explicit Cursor logout wins conflicting fields; auth failures are distinct
 });
 test('late status responses cannot resurrect a disconnected card or stale control tower login',()=>{
  const current={codex:{connected:false,authRevision:4},gpt:{source:'codex',connected:false},grok:{connected:false,authRevision:8}},stale={codex:{connected:true,authRevision:3},gpt:{source:'codex',connected:true},grok:{connected:true,authRevision:7}};
- const merged=mergeConnectionStatus(current,stale);assert.equal(merged.gpt.connected,false);assert.equal(merged.grok.connected,false);assert.equal(mergeConnectionStatus(merged,{...stale,grok:{connected:true,authRevision:9}}).grok.connected,true);
+ assert.equal(mergeConnectionStatus(null,{codex:{connected:true,checkedAt:1},gpt:{source:'codex',connected:true}},16002).gpt.connected,false);const merged=mergeConnectionStatus(current,stale);assert.equal(merged.gpt.connected,false);assert.equal(merged.grok.connected,false);assert.equal(mergeConnectionStatus(merged,{...stale,grok:{connected:true,authRevision:9}}).grok.connected,true);
 });
 test('fresh installation/model metadata remains usable while old authentication is still disconnected',()=>{
  const health=new ConnectionHealth({});health.seed('grok',{installed:false,connected:false,modelId:null});const value=health.view('grok',{installed:true,connected:true,modelId:'new-model'});assert.equal(value.installed,true);assert.equal(value.modelId,'new-model');assert.equal(value.connected,false);
