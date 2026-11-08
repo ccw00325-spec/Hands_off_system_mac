@@ -8,6 +8,7 @@ import {
 } from "./team.js";
 import { isQuotaExhausted,isAuthenticationFailure } from "./provider-errors.js";
 import { remainingQuota, replacementCandidates } from "./quota-routing.js";
+import { rememberTeam } from './team-memory.js';
 export const DEFAULT_ROLES = Object.freeze({
   gpt: "gpt",
   grok: "grok",
@@ -51,8 +52,7 @@ export class RoleAssignments {
     const roles = validateRoles(value);
     await this.projects.mutate((data) => {
       const project = this.projects.find(data, id);
-      project.roles = roles;
-      project.team = defaultTeam(roles);
+      rememberTeam(data, project, defaultTeam(roles));
     });
     return roles;
   }
@@ -77,12 +77,7 @@ export class RoleAssignments {
     const team = validateTeam(value, { exclusive: true });
     await this.projects.mutate((data) => {
       const project = this.projects.find(data, id);
-      project.team = team;
-      project.roles = {
-        gpt: team[0].provider,
-        grok: team.find((agent) => agent.roles.includes("feature")).provider,
-        claude: team.find((agent) => agent.roles.includes("ui")).provider,
-      };
+      rememberTeam(data, project, team);
     });
     return team;
   }

@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { inheritedTeam, roleSummary } from './team-memory.js';
 export class Projects {
   constructor(store) {
     this.store = store;
@@ -42,6 +43,8 @@ export class Projects {
         createdAt: new Date().toISOString(),
         ...(workspace ? { workspace } : {}),
       };
+      const team = inheritedTeam(data);
+      if (team) { project.team = team; project.roles = roleSummary(team); }
       data.items.push(project);
       data.activeId = project.id;
     });

@@ -515,6 +515,11 @@ dialog::backdrop {
   background: var(--overlay);
   backdrop-filter: blur(5px);
 }
+#startup-recovery-dialog { width: min(570px, calc(100vw - 32px)); }
+.startup-recovery-body { padding: 22px 28px; display: grid; gap: 12px; line-height: 1.7; }
+.startup-recovery-body p { margin: 0; }
+.startup-recovery-body select { width: 100%; }
+.startup-recovery-footer { padding: 18px 28px; border-top: 1px solid var(--subtle-border); display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
 #connections {
   width: 840px;
 }

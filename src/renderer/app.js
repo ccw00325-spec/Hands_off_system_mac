@@ -1,5 +1,7 @@
 import {mergeConnectionStatus} from './connection-state.js';
 import {recoveryActions} from './auth-recovery.js';
+import {createStartupRecovery} from './startup-recovery-view.js';
+import {replaceTeamProvider} from '../core/startup-recovery.js';
 import {
   conversationTree,
   terminalFeed,
@@ -107,6 +109,23 @@ const setupView=createSetupView({
  login:async(id,reopen)=>{await refreshStatus();const selector=reopen?`#${id==='gpt'?'codex':id}-login-browser`:`#${id==='gpt'?'codex':id}-login`;const button=$(selector);if(button&&!button.disabled)button.click();else throw new Error('공식 로그인 연결을 먼저 확인하세요.');},
  model:id=>{const control=$('#'+id+'-model')??$('#'+(id==='gpt'?'codex':id)+'-login');control?.scrollIntoView({block:'center'});control?.focus();},
  saveTeam:async team=>{if(team.some(a=>a.provider==='grok'&&a.roles.includes('ui'))&&!await call(api.confirmCursorUIRole()))throw new Error('UI 구현 담당을 다른 AI로 선택하세요.');teamConfig=await call(api.setTeam(projectData.activeId,team));renderAssignedRoles();},close:()=>closePrerequisites(),
+});
+const startupRecovery=createStartupRecovery({
+ currentProject:()=>projectData?.activeId,
+ state:async id=>{const checked=await call(api.recheckTeamConnections(id)),team=await call(api.team(id));await refreshStatus(checked);if(projectData.activeId===id){teamConfig=team;renderAssignedRoles();}return{team,connections:connection};},
+ models:provider=>preparedCatalog[provider]?.rows??[],
+ login:actor=>recoverLogin(actor,true),
+ replace:async(entry,provider,modelId)=>{
+  const id=projectData.activeId,current=await call(api.team(id));
+  if(id!==entry.projectId)throw new Error('프로젝트가 변경됐습니다. 현재 프로젝트에서 다시 선택하세요.');
+  if(provider==='grok'&&current.some(row=>row.provider===entry.provider&&row.roles.includes('ui'))&&!await call(api.confirmCursorUIRole()))throw new Error('UI 담당을 다른 AI로 선택하거나 경고에서 승인해 주세요.');
+  const saved=await call(api.setTeam(id,replaceTeamProvider(current,entry.provider,provider,modelId)));
+  if(projectData.activeId===id){teamConfig=saved;renderAssignedRoles();updateReadiness();}
+  toast('AI 구성을 저장했습니다. 다음 실행과 새 프로젝트에도 유지합니다. 진행 중인 작업은 시작 당시 배치를 유지합니다.');
+  try{await refreshStatus(await call(api.recheckTeamConnections(id)));}catch{ return {connected:false}; }
+  return {connected:connection?.[provider]?.connected===true};
+ },
+ modelSetup:()=>openConnections(),notice:toast,
 });
 desk = createAgentDesk({ onAction: missionAction,onLogin:recoverLogin,onChange:changeDisconnectedAI });
 notifications = createNotifications(api, handleNotification);
@@ -923,6 +942,10 @@ async function initialize() {
       await loadConversation();
       await document.fonts.ready;
       await call(api.startupReady());
+      if(boot.connectionRecovery?.enabled&&sessionStorage.getItem('tower-startup-recovery')!==boot.connectionRecovery.id){
+        sessionStorage.setItem('tower-startup-recovery',boot.connectionRecovery.id);
+        void startupRecovery.begin({enabled:true,projectId:projectData.activeId});
+      }
     } catch (error) {
       toast(error.message, "error");
       void api.startupFailed(error.message);
@@ -1650,11 +1673,12 @@ function refreshMission() {
   if (usageData) renderUsage(usageData);
 }
 function closeRecoveryContext(){if($('#agent-session-dialog').open)$('#close-agent-session').click();if($('#roles-dialog').open)$('#roles-dialog').close();}
-async function recoverLogin(actor){
- const agent=currentDisplayTeam().find(row=>row.id===actor);if(!agent)return;
+async function recoverLogin(actor,configured=false){
+ const agent=(configured===true?teamConfig??[]:currentDisplayTeam()).find(row=>row.id===actor);if(!agent)return;
  closeRecoveryContext();showPrerequisites(await call(api.prerequisites()),'accounts');
  const provider=agent.provider,button=$('#'+(provider==='gpt'?(connection.gpt.source==='api'?'chatgpt':'codex'):provider)+'-login');button?.closest('section')?.scrollIntoView({block:'start'});
  try{
+  if(configured===true&&connection[provider]?.installed===false)return;
   const login=(provider==='gpt'&&connection.gpt.source==='codex'?connection.codex:connection[provider])?.login;
   if(login?.waiting){if(login.hasBrowserLink)await call(api.loginBrowser(provider==='gpt'?'codex':provider));return;}
   if(provider==='gpt'&&connection.gpt.source==='api'){$('#chatgpt-login').click();return;}

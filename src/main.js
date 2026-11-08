@@ -297,6 +297,7 @@ async function prepareStartup() {
     status: current,
     catalog: models,
     prerequisites: tools,
+    connectionRecovery: { enabled: restored.session.firstLaunch === false, id: randomUUID() },
   };
 }
 async function scanPrerequisites(current, settings, projectData, projectId = projectData.activeId, requiredOnly = false) {
@@ -790,7 +791,7 @@ else {
         const first=!startupPromise;startupPromise??=prepareStartup();const boot=await startupPromise;
         if(first||!mainRevealed)return boot;
         const current=await status();
-        return{projects:await projects.list(),preferences:await preferences.get(),restored:{...current,session:{...current.session,firstLaunch:false},browser:await browser.settings()},status:current,catalog:catalog.snapshot(),prerequisites:prerequisites.current};
+        return{projects:await projects.list(),preferences:await preferences.get(),restored:{...current,session:{...current.session,firstLaunch:false},browser:await browser.settings()},status:current,catalog:catalog.snapshot(),prerequisites:prerequisites.current,connectionRecovery:boot.connectionRecovery};
       });
       handle('tower:prerequisites', async (options = {}) => {
         if (!options || typeof options !== 'object' || Array.isArray(options) || (options.passive !== undefined && typeof options.passive !== 'boolean')) throw new Error('설치 확인 요청을 확인하세요.');
@@ -943,6 +944,11 @@ else {
       handle("tower:roles", (id) => roles.get(id));
       handle("tower:set-roles", (id, value) => roles.set(id, value));
       handle("tower:team", (id) => roles.getTeam(id));
+      handle('tower:recheck-team-connections', async id => {
+        const team = await roles.getTeam(id), current = await status();
+        await Promise.all([...new Set(team.map(row => row.provider === 'gpt' && current.gpt.source === 'codex' ? 'codex' : row.provider))].map(provider => connectionHealth.check(provider)));
+        return status();
+      });
       handle('tower:confirm-cursor-ui-role', async () => {
         const answer=await dialog.showMessageBox(window,{type:'warning',title:'Cursor UI 역할 선택 확인',
           message:'Cursor에게 UI 구현·연결을 맡기는 것은 현재 권장 설정에서 추천하지 않습니다. 선택하시겠습니까?',

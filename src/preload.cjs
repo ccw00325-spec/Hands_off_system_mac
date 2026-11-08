@@ -35,6 +35,7 @@ contextBridge.exposeInMainWorld(
     setGptSource: call("set-gpt-source"),
     saveGptModel: call("save-gpt-model"),
     team: call("team"),
+    recheckTeamConnections: call('recheck-team-connections'),
     confirmCursorUIRole: call('confirm-cursor-ui-role'),
     setTeam: call("set-team"),
     geminiLogin: call("gemini-login"),
