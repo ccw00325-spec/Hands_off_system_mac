@@ -96,6 +96,16 @@ export async function checkDesktopFallback({
   await page.locator("#finish-connections").click();
   await page.locator("#open-roles").click();
   await page.locator("#agent-count").selectOption("4");
+  // New projects inherit the last saved team. This scenario needs explicit
+  // feature/UI owners, independent of the preceding resizing scenario.
+  for (const [role, actor] of [['feature', 'grok'], ['ui', 'claude']]) {
+    const selected = page.locator(`#team-editor input[value="${role}"]:checked`);
+    const current = await selected.evaluate(input => input.closest('fieldset').dataset.agent);
+    if (current !== actor) {
+      await selected.uncheck();
+      await page.locator(`#team-editor [data-agent="${actor}"] input[value="${role}"]`).check();
+    }
+  }
   for (const [id, provider] of Object.entries({
     gpt: "gpt",
     grok: "gemini",
@@ -131,6 +141,8 @@ export async function checkDesktopFallback({
   ).value;
   assert.equal(saved[1].fallback.provider, "claude");
   assert.equal(saved.length, 4);
+  assert.ok(saved[1].roles.includes('feature'));
+  assert.ok(saved[2].roles.includes('ui'));
   await page
     .locator('[data-desk-agent="grok"] img[src$="provider-gemini.svg"]')
     .waitFor();
