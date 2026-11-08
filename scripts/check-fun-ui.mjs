@@ -27,7 +27,7 @@ try {
       module(file)[name].prototype.models=async()=>[{id:'fixture-model',name:'Fixture model'}];
     }
     const Preferences=module('preferences').Preferences,get=Preferences.prototype.get;
-    Preferences.prototype.get=async function(){return {...await get.call(this),onboardingComplete:true,designApproval:false};};
+    Preferences.prototype.get=async function(){return {...await get.call(this),engineeringGates:false,onboardingComplete:true,designApproval:false};};
     dialog.showOpenDialog=async()=>({canceled:false,filePaths:[data.root]});
     globalThis.__funPlans=[];globalThis.__funBuilds=0;globalThis.__answerNotices=[];
     const Input=module('input-notifications').InputNotifications,observe=Input.prototype.observe;

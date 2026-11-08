@@ -13,7 +13,7 @@ try{
   const path=process.getBuiltinModule('url').fileURLToPath(data.url),require=process.getBuiltinModule('module').createRequire(path);
   globalThis.__toolsReady=false;globalThis.__sites=[];globalThis.__hostApproved=false;globalThis.__workCalls=0;
   require(path.replace('prerequisites.js','agent-chat.js')).AgentChat.prototype.send=async()=>{globalThis.__workCalls++;return{message:{content:'fixture reply'}};};
-  const Prerequisites=require(path).Prerequisites, scan=Prerequisites.prototype.scan;
+  const Roles=require(path.replace('prerequisites.js','roles.js')).RoleAssignments,originalTeam=Roles.prototype.getTeam;Roles.prototype.getTeam=async function(id){return globalThis.__honorTeam?originalTeam.call(this,id):[{id:'gpt',provider:'gpt',roles:['control','debug','review','test']},{id:'grok',provider:'gpt',roles:['feature','ui','review','critic']}];};const Prerequisites=require(path).Prerequisites, scan=Prerequisites.prototype.scan;
   Prerequisites.prototype.scan=async function(_status,options={}){
    const ready=globalThis.__toolsReady;
    const fixture=new Prerequisites({node:async()=>data.nodePath,find:async name=>ready&&name!=='git'?'/fixture/'+name:null,
@@ -22,7 +22,7 @@ try{
   };
   const Browser=require(path.replace('prerequisites.js','browser.js')).BrowserOpener,open=Browser.prototype.open;
   Browser.prototype.open=async function(url){this.openDefault=async safe=>{globalThis.__sites.push(safe);return true;};return open.call(this,url);};
-  for(const [file,name]of[['codex','CodexConnection'],['claude','ClaudeConnection'],['cursor','CursorConnection'],['gemini','GeminiConnection']])require(path.replace('prerequisites.js',file+'.js'))[name].prototype.status=async()=>({installed:false,connected:false,login:{waiting:false}});
+  for(const [file,name]of[['codex','CodexConnection'],['claude','ClaudeConnection'],['cursor','CursorConnection'],['gemini','GeminiConnection']])require(path.replace('prerequisites.js',file+'.js'))[name].prototype.status=async()=>({installed:file==='codex'&&globalThis.__toolsReady,connected:file==='codex'&&globalThis.__toolsReady,login:{waiting:false}});
   const show=dialog.showMessageBox;dialog.showMessageBox=(...args)=>args.at(-1)?.title==='현재 PC에서 실행'?Promise.resolve({response:globalThis.__hostApproved?1:0}):show(...args);
  },{url:pathToFileURL(resolve('src/core/prerequisites.js')).href,nodePath:process.execPath});
  const page=await workspaceWindow(application);page.setDefaultTimeout(30000);
@@ -87,14 +87,14 @@ try{
  await application.evaluate(()=>globalThis.__hostApproved=true);await page.locator('#save-settings').click();await page.locator('#settings-dialog').waitFor({state:'hidden'});
  const approved=(await page.evaluate(()=>window.tower.preferences())).value;assert.equal(approved.executionBackend,'host');assert.equal(approved.allowExecution,true);
  checks.push('Host execution requires a separate native consent: cancel preserves Docker, explicit approval persists the chosen host setting');
- const shortcut=page.locator('#open-prerequisites-header');
- assert.equal(await shortcut.innerText(),'필수 프로그램 설치');
+ const shortcut=page.locator('#open-connections');
+ assert.match(await shortcut.innerText(),/시작 준비/);
  for(const width of [1440,1280,900,390]) {
   await page.setViewportSize({width,height:960});
   const box=await shortcut.boundingBox();assert.ok(box&&box.x>=0&&box.x+box.width<=width+1&&box.y>=0&&box.y+box.height<=960);
  }
  await page.setViewportSize({width:1440,height:960});
- await shortcut.click();await page.locator('#prerequisites-dialog[open]').waitFor();
+ await shortcut.click();await page.locator('#prerequisites-dialog[open]').waitFor();await page.locator('[data-setup-tab=tools]').click();
  assert.match(await page.locator('[data-tool=node]').innerText(),/준비됨/);
  assert.equal(await page.locator('#settings-dialog').evaluate(el=>el.open),false);
  await page.locator('#close-prerequisites').click();await page.locator('#prerequisites-dialog').waitFor({state:'hidden'});

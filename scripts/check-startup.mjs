@@ -168,7 +168,7 @@ try {
   await page.locator("#model-button").click();
   assert.equal(await page.locator("#model-list .model-row").count(), 2);
   await page.locator("#model-list .model-row").nth(1).click();
-  await page.locator("#open-connections").click();
+  await page.locator("#open-connections").click();await page.locator("[data-setup-tab=accounts]").click();
   assert.equal(
     await page.locator("#grok-model option[value=grok-two]").count(),
     1,

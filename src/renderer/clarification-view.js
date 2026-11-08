@@ -1,3 +1,4 @@
+import {preferenceQuestion} from '../core/autopilot-policy.js';
 const $ = selector => document.querySelector(selector);
 const node = (tag, text) => {
   const item = document.createElement(tag);
@@ -10,7 +11,7 @@ export function createClarifications({ submit, changed, error }) {
   const form = $('#fun-questions-form');
   const fields = $('#fun-question-fields');
   let current = null, displayed = null, busy = false;
-  const deferred = new Set(), drafts = new Map();
+  const deferred = new Set(), drafts = new Map(), remembered=new Map();
   const key = run => run && `${run.id}:${run.questionBatchId}`;
   function close() { if (dialog.open) dialog.close(); }
   function defer() { if (current) deferred.add(key(current)); close(); }
@@ -21,7 +22,7 @@ export function createClarifications({ submit, changed, error }) {
     if (displayed !== key(current)) {
       displayed = key(current);
       fields.replaceChildren();
-      $('#fun-questions-title').textContent = current.options.funEnabled === false ? '진행 전 확인이 필요해요' : '/fun · 요구사항의 빈칸을 채워 주세요';
+      $('#fun-questions-title').textContent = current.questionSource==='critical-challenge'?'독립 비판 검증 · 전제를 확인해 주세요':current.options.funEnabled === false ? '진행 전 확인이 필요해요' : '/fun · 요구사항의 빈칸을 채워 주세요';
       $('#fun-questions-context').textContent = current.request;
       const draft = drafts.get(displayed) ?? new Map(); drafts.set(displayed, draft);
       for (const question of current.questions) {
@@ -44,7 +45,11 @@ export function createClarifications({ submit, changed, error }) {
         text.disabled = !custom.checked;
         custom.onchange = () => { text.disabled = false; draft.set(question.id, { kind: 'text', value: text.value }); text.focus(); };
         text.oninput = () => draft.set(question.id, { kind: 'text', value: text.value });
-        field.append(text); fields.append(field);
+        field.append(text);
+        if(preferenceQuestion(question,current.questionSource)){
+          const label=node('label'),remember=node('input');remember.type='checkbox';remember.dataset.rememberQuestion=question.id;const selected=remembered.get(displayed)??new Set();remembered.set(displayed,selected);remember.checked=selected.has(question.id);remember.onchange=()=>remember.checked?selected.add(question.id):selected.delete(question.id);label.className='check-label';label.append(remember,node('span','같은 프로젝트·요청·질문에 이 답변 기억하기'));field.append(label);
+        }
+        fields.append(field);
       }
     }
     if (!dialog.open) dialog.showModal();
@@ -66,7 +71,7 @@ export function createClarifications({ submit, changed, error }) {
     const answers = scope.questions.map(question => ({ id: question.id, ...draft.get(question.id) }));
     busy = true; $('#submit-fun-questions').disabled = true; $('#fun-questions-error').textContent = '';
     try {
-      const state = await submit(scope, answers);
+      const state = await submit(scope, answers,[...(remembered.get(displayed)??[])]);
       deferred.add(key(scope)); drafts.delete(key(scope)); close(); changed(state);
     } catch (failure) { $('#fun-questions-error').textContent = failure.message; error(failure); }
     finally { busy = false; $('#submit-fun-questions').disabled = false; open(); }

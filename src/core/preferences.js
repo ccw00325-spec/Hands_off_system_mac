@@ -21,6 +21,8 @@ export const DEFAULT_PREFERENCES = Object.freeze({
   visualReview: true,
   mutationByDefault: false,
   funByDefault: true,
+  engineeringGates: true,
+  autopilotEnabled: true,
   executionBackend: 'docker',
   dockerImage: 'node:24-bookworm-slim',
   terminalFontSize: 13,
@@ -59,6 +61,8 @@ export class Preferences {
       (input.dockerImage !== undefined && (typeof input.dockerImage !== 'string' || input.dockerImage.length > 200 || !/^[a-z0-9][a-z0-9./_:-]*(?:@sha256:[a-f0-9]{64})?$/.test(input.dockerImage))) ||
       (input.mutationByDefault !== undefined && typeof input.mutationByDefault !== 'boolean') ||
       (input.funByDefault !== undefined && typeof input.funByDefault !== 'boolean') ||
+      (input.engineeringGates !== undefined && typeof input.engineeringGates !== 'boolean') ||
+      (input.autopilotEnabled !== undefined && typeof input.autopilotEnabled !== 'boolean') ||
       (input.maxDailyCalls !== undefined && (!Number.isInteger(input.maxDailyCalls) || input.maxDailyCalls < 5 || input.maxDailyCalls > 5000)) ||
       (input.maxOutputTokens !== undefined && (!Number.isInteger(input.maxOutputTokens) || input.maxOutputTokens < 1024 || input.maxOutputTokens > 65536)) ||
       (input.maxImageCallsPerDay !== undefined && (!Number.isInteger(input.maxImageCallsPerDay) || input.maxImageCallsPerDay < 0 || input.maxImageCallsPerDay > 100)) ||
@@ -94,4 +98,5 @@ export class Preferences {
     await this.store.write('preferences', { ...saved, funByDefault: enabled });
     return this.get();
   }
+  async setAutopilotDefault(enabled){if(typeof enabled!=='boolean')throw new Error('자동 수락 켜기·끄기 값을 확인하세요.');const saved=await this.store.read('preferences',{});await this.store.write('preferences',{...saved,autopilotEnabled:enabled});return this.get();}
 }

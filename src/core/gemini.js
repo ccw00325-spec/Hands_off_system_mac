@@ -467,6 +467,6 @@ export class GeminiProvider {
     return this.ask(CHAT_FORMAT, context);
   }
   review(context) {
-    return this.ask(reviewInstructions(context.visualComparison), context);
+    return this.ask(reviewInstructions(context.visualComparison,context.challenge,context.renderFailure), context);
   }
 }

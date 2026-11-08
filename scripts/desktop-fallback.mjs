@@ -91,7 +91,7 @@ export async function checkDesktopFallback({
     .waitFor();
   await page.locator("#save-settings").click();
   await page.locator("#settings-dialog").waitFor({ state: "hidden" });
-  await page.locator("#open-connections").click();
+  await page.locator("#open-connections").click();await page.locator("[data-setup-tab=accounts]").click();
   await page.locator("#refresh-status").click();
   await page.locator("#finish-connections").click();
   await page.locator("#open-roles").click();

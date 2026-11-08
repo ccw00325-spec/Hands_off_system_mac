@@ -97,13 +97,13 @@ test("2..4 panels allow one GPT login, duplicate capabilities and multi-role age
     defaultTeam({ gpt: "gpt", grok: "gpt", claude: "gpt" }),
     2,
   );
-  assert.deepEqual(two[1].roles, ["feature", "debug", "review", "ui", "test"]);
+  assert.deepEqual(two[1].roles, ["feature", "debug", "review", "ui", "test", "critic"]);
   assert.ok(two[0].roles.includes("test"));
   assert.ok(two.every((agent) => agent.provider === "gpt"));
   const four = resizeTeam(two, 4);
   assert.equal(four.length, 4);
   assert.ok(four[1].roles.includes("ui") && !four[2].roles.includes("ui"));
-  assert.deepEqual(four[3].roles, ["debug", "review", "test"]);
+  assert.deepEqual(four[3].roles, ["debug", "review", "critic", "test"]);
   assert.throws(() => validateTeam(two.slice(0, 1)));
   assert.throws(() =>
     validateTeam([...four, { id: "fifth", provider: "gpt", roles: ["debug"] }]),

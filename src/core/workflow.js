@@ -14,6 +14,7 @@ import { layoutPreview } from './layout-preview.js';
 import { validateVisualReview } from './visual-review.js';
 import { clarificationQuestions, clarificationAnswers } from './clarifications.js';
 import { reviewOrder, orderDebugTasks, sortReviewAgents } from './review-order.js';
+import {formalSpecification,challengeReport,challengeQuestions,assertRedTests,modelVendor} from './engineering-gates.js';
 
 const ACTIVE = new Set([
   "testing",
@@ -159,6 +160,8 @@ export class Workflow {
     )
       throw new Error("자동 수정 최대 횟수를 0~20 사이에서 직접 설정하세요.");
     await this.workspace.grant(projectId);
+    if(options.engineeringGates&&!teamFor(options).some(agent=>agent.roles.includes('test')))throw new Error('구현 전 테스트를 위해 AI 역할 변경에서 테스트 설계·실행 담당을 배정하세요.');
+    if(options.engineeringGates&&!options.allowExecution)throw new Error('구현 전 테스트를 먼저 실행하려면 설정에서 검증 실행과 현재 폴더 실행에 동의하세요. 아직 AI를 호출하지 않았습니다.');
     for (const agent of teamFor(options))
       if (!(await this.providers[agent.id]?.ready(options)))
         throw new Error(
@@ -232,7 +235,7 @@ export class Workflow {
         });
       });
   }
-  async answerQuestions(projectId, runId, batchId, answers, conversationId) {
+  async answerQuestions(projectId, runId, batchId, answers, conversationId, remember = []) {
     if (this.isActive(projectId)) throw new Error('다른 작업이 진행 중입니다. 질문 답변은 잠시 후 전송하세요.');
     this.starting.add(projectId);
     try {
@@ -244,7 +247,12 @@ export class Workflow {
       const grant = await this.workspace.grant(projectId, state.grantId);
       if (grant.root !== state.root) throw new Error('작업 폴더 연결이 변경되었습니다.');
       const decisions = clarificationAnswers(clarificationQuestions(state.questions), answers);
+      if(secretFinding(JSON.stringify(answers)))throw new Error('비밀값은 답변에 넣지 말고 계정 연결에서 등록하세요.');
+      if(!Array.isArray(remember))throw new Error('반복 확인 규칙을 저장할 질문 목록을 확인하세요.');
+      if(secretFinding(JSON.stringify(decisions)))throw new Error('비밀값은 답변에 넣지 말고 계정 연결 화면에서 등록하세요.');
+      if(remember.length)await this.autopilot?.rememberQuestions(state,decisions,remember);
       state.options.questionAnswers = [...(state.options.questionAnswers ?? []), { batchId, answers: decisions }];
+      const resumeReview=state.questionSource==='critical-challenge'&&state.redTeam?.status==='questions'&&state.tasks.some(t=>t.status==='reported')&&decisions.every(a=>a.kind==='option'&&a.value==='기존 명세대로 유지하고 검토를 계속');
       state.questions = [];
       state.questionBatchId = null;
       state.status = 'planning';
@@ -252,7 +260,7 @@ export class Workflow {
       const run = { state, controller: new AbortController(), queue: Promise.resolve() };
       this.runs.set(projectId, run);
       await this.record(run, 'gpt', '사용자 답변을 반영해 같은 작업의 명세를 이어서 작성합니다.', { answers: decisions });
-      this.launch(run);
+      this.launch(run,resumeReview);
       return structuredClone(state);
     } finally { this.starting.delete(projectId); }
   }
@@ -323,7 +331,7 @@ export class Workflow {
     const panel = usage.byPanel[actor] ??= { calls: 0, input: 0, output: 0, measured: 0 };
     const started = Date.now();
     let measured = false, attempted = false, actualProvider = provider, actualModel, quotaTicket, actualCost;
-    const onProviderAttempt = async ({ provider: next }) => {
+    const onProviderAttempt = async ({ provider: next,modelId }) => {
       if (quotaTicket) await this.quota?.settle(quotaTicket, actualCost);
       quotaTicket = null; actualCost = undefined;
       if (attempted && api && !measured) usage.costUnknown = true;
@@ -331,7 +339,7 @@ export class Workflow {
       api = next === "gpt" && state.options.gptSource === "api";
       actualProvider = next;
       const routeOptions=agentOptions(state.options,actor);
-      actualModel=({gpt:routeOptions.gptModel,claude:routeOptions.claudeModel,gemini:routeOptions.geminiModel,grok:routeOptions.grokRoute?.modelId})[next];
+      actualModel=modelId??({gpt:routeOptions.gptModel,claude:routeOptions.claudeModel,gemini:routeOptions.geminiModel,grok:routeOptions.grokRoute?.modelId})[next];
       measured = false;
       if (usage.calls >= (state.options.maxAgentCalls ?? Infinity))
         throw new Error("AI 호출 한도에 도달했습니다. 설정에서 한도를 확인한 뒤 새 작업을 시작하세요.");
@@ -346,6 +354,9 @@ export class Workflow {
       panel.calls++;
       panel.providers ??= {};
       panel.providers[next] = (panel.providers[next] ?? 0) + 1;
+      const key=next+':'+(actualModel??'default');panel.models??={};
+      const row=panel.models[key]??={provider:next,model:actualModel??null,calls:0,input:0,output:0,measured:0,api};row.calls++;
+      if(!run.ephemeral)this.notify({type:'workflow',projectId:state.projectId,state:structuredClone(state)});
     };
     const onProviderSwitch = async (change) => {
       state.options.runtimeRoutes ??= {};
@@ -361,12 +372,16 @@ export class Workflow {
       panel.measured++;
       panel.input += input;
       panel.output += output;
+      let modelRow=panel.models?.[actualProvider+':'+(actualModel??'default')];
+      if(modelRow&&typeof model==='string'&&model.length<160&&model!==actualModel){const oldKey=actualProvider+':'+(actualModel??'default');modelRow.calls--;if(!modelRow.calls)delete panel.models[oldKey];actualModel=model;const key=actualProvider+':'+model;modelRow=panel.models[key]??={provider:actualProvider,model,calls:0,input:0,output:0,measured:0,api};modelRow.calls++;}
+      if(modelRow){modelRow.measured++;modelRow.input+=input;modelRow.output+=output;}
       if (api && model && model === state.options.apiRateModel &&
           (state.options.apiInputRate > 0 || state.options.apiOutputRate > 0)) {
         const cost = (input * state.options.apiInputRate + output * state.options.apiOutputRate) / 1_000_000;
         usage.estimatedUsd = (usage.estimatedUsd ?? 0) + cost;
         actualCost = cost;
         panel.estimatedUsd = (panel.estimatedUsd ?? 0) + cost;
+        if(modelRow)modelRow.estimatedUsd=(modelRow.estimatedUsd??0)+cost;
       } else if (api) usage.costUnknown = true;
       if (!api) actualCost = 0;
     };
@@ -374,6 +389,8 @@ export class Workflow {
     try {
       const { snapshot, signal, options, designImage, ...rest } = context;
       const handoff = stateHandoff(state, actor, action, context);
+      if(context.challenge){handoff.recentFacts=[];handoff.conversation=[];handoff.completedTasks=handoff.completedTasks.map(({summary,...task})=>task);handoff.findings=[];handoff.validation=null;}
+      const providerOptions={...redactData(options)};if(context.challenge)delete providerOptions.conversationHistory;
       if (!run.ephemeral && state.id && state.grantId) {
         const sequence = (run.handoffSequence = (run.handoffSequence ?? 0) + 1);
         await this.workspace.write(state.projectId, `.control-tower/runs/${state.id}/handoffs/${sequence}-${actor}-${randomUUID()}.json`, JSON.stringify(handoff, null, 2), {internal:true, grantId:state.grantId, newOnly:true});
@@ -381,7 +398,7 @@ export class Workflow {
       const payload = {
         ...redactData(rest), handoff: compactHandoff(redactData(rest), handoff), signal, designImage,
         snapshot: providerSnapshot(snapshot),
-        options: { ...redactData(options), runtimeRoutes: state.options.runtimeRoutes ?? {}, exhaustedProviders: state.options.exhaustedProviders ??= [], cursorUiApproved: state.options.cursorUiApproved ??= [],
+        options: { ...providerOptions, runtimeRoutes: state.options.runtimeRoutes ?? {}, exhaustedProviders: state.options.exhaustedProviders ??= [], cursorUiApproved: state.options.cursorUiApproved ??= [],
           onCursorUiApproved: async key=>{if(!state.options.cursorUiApproved.includes(key))state.options.cursorUiApproved.push(key);},
           onProviderExhausted: async provider=>{if(!state.options.exhaustedProviders.includes(provider))state.options.exhaustedProviders.push(provider);},
           onApiReservation: async amount => { if (quotaTicket) await this.quota.reserve(quotaTicket, amount, state.options); },
@@ -468,6 +485,7 @@ export class Workflow {
       throw new Error("현재 대화에서 검토할 시안이 준비될 때까지 기다려 주세요.");
     run.controller.signal.throwIfAborted();
     run.state.design.status = "approved";
+    if(run.state.rememberDesignApproval)await this.autopilot?.rememberDesign(run.state);
     await this.record(run, "gpt", "승인한 UI 시안과 수정 요청을 반영해 구현을 시작합니다.");
     run.acceptDesign();
   }
@@ -516,13 +534,14 @@ export class Workflow {
               ...task,
               instructions: `${task.instructions}\nHost test plan: ${JSON.stringify({ ...state.testing.plan, cases: state.testing.plan.cases.filter((row) => task.requirementIds.includes(row.requirementId)), assignedFiles: task.testFiles ?? state.testing.plan.files })}\nWrite meaningful assertions for every case. Use node:test, name each test starting with its case ID (e.g. T1). Only edit assignedFiles, not every file in the full test plan. Never modify application code or weaken requirements. Do not claim execution. No package installation.`,
             }
-          : state.visual?.status==='repairing'&&task.kind==='ui' ? {...task,instructions:task.instructions+'\nVisual repair: attached LEFT panel is the approved reference, RIGHT is the previous implementation. Correct only the supplied UI differences. Preserve all behavior, tests and the reference.'} : task,
+          : state.visual?.status==='repairing'&&task.kind==='ui' ? {...task,instructions:task.instructions+(state.visual.renderFailure?'\nRender repair: use the supplied actual error/DOM diagnostics to repair only UI code. The attached image, if any, is the original approved reference. Do not alter permissions, tests or the reference.':'\nVisual repair: attached LEFT panel is the approved reference, RIGHT is the previous implementation. Correct only the supplied UI differences. Preserve all behavior, tests and the reference.')} : task,
       issues,
       validation: state.validation ? { ...state.validation, stale: true } : null,
       previousTaskReports: state.tasks.filter(row=>row.status==='reported').map(row=>({id:row.id,owner:row.owner,kind:row.kind,summary:row.report?.summary})),
       spec: state.spec,
       design: state.design?.status === "approved" ? state.design : undefined,
       snapshot,
+      renderFailure:state.visual?.renderFailure?state.visual.diagnostics:undefined,
       options: state.options,
       signal: run.controller.signal,
     });
@@ -596,6 +615,7 @@ export class Workflow {
         path, baseHash: snapshot.files.find((file) => file.path === path)?.hash ?? null,
       })), state.id);
     const changed = proposed.map(({ path, hash }) => ({ path, hash }));
+    if(task.kind==='test'&&state.testFirst?.hashes&&issues.some(issue=>issue.mutationGap===true))for(const file of changed)state.testFirst.hashes[file.path]=file.hash;
     state.ownership ??= {};
     for (const file of changed)
       state.ownership[file.path] = { owner: task.owner, taskId: task.id, hash: file.hash };
@@ -746,6 +766,7 @@ export class Workflow {
             ? compileFunPlan(proposed, state.options)
             : proposed,
           state.options), state.options);
+        if(state.options.engineeringGates&&!plan.questions?.length)state.formal=formalSpecification(plan);
         break;
       } catch (error) {
         if (attempt) throw error;
@@ -759,6 +780,14 @@ export class Workflow {
     }
     delete state.options.planCorrection;
     if (plan.questions?.length) {
+      state.questionSource='requirements';
+      const questions=clarificationQuestions(plan.questions),automatic=await this.autopilot?.answers(state,questions)??[];
+      if(automatic.length){
+        state.options.questionAnswers=[...(state.options.questionAnswers??[]),{batchId:randomUUID(),answers:automatic,source:'saved-exact-rule'}];
+        await this.record(run,'system','저장한 반복 확인 규칙으로 취향 질문에 답했습니다.',{activity:'autopilot',answers:automatic});
+        if(automatic.length===questions.length){if((state.autoAnswerRounds=(state.autoAnswerRounds??0)+1)>3)throw new Error('자동 답변이 반복됩니다. 규칙과 질문을 확인하세요.');return this.execute(run);}
+        plan.questions=questions.filter(q=>!automatic.some(a=>a.id===q.id));
+      }
       state.status = "needs_input";
       state.questions = clarificationQuestions(plan.questions);
       state.questionBatchId = randomUUID();
@@ -768,6 +797,13 @@ export class Workflow {
       return;
     }
     state.spec = plan.spec;
+    state.requirements=plan.requirements??[];
+    if(state.options.engineeringGates){
+      await this.record(run,'system','형식 명세 검증 통과 · BDD·파일 범위·선언된 제약의 교집합을 확인했습니다.',{activity:'formal-spec'});
+      if(!await this.criticalChallenge(run,'architecture',snapshot,plan))return;
+    }
+    state.planRevision=(state.planRevision??0)+1;
+    if(state.formal)await this.workspace.write(state.projectId,`.control-tower/runs/${state.id}/formal-spec-${state.planRevision}.json`,JSON.stringify(state.formal,null,2),{internal:true,grantId:state.grantId,newOnly:true});
     if (
       state.options.suggestRepositoryName &&
       typeof plan.repositoryName === "string" &&
@@ -782,7 +818,7 @@ export class Workflow {
       state.options.testPlan = plan.testPlan;
       await this.workspace.write(
         state.projectId,
-        `.control-tower/runs/${state.id}/test-plan.md`,
+        `.control-tower/runs/${state.id}/test-plan${state.planRevision>1?'-'+state.planRevision:''}.md`,
         testPlanMarkdown(plan.testPlan),
         { internal: true, grantId: state.grantId, newOnly: true },
       );
@@ -790,7 +826,7 @@ export class Workflow {
     state.tasks = plan.tasks.map((task) => ({ ...task, status: "pending" }));
     await this.workspace.write(
       state.projectId,
-      enabled ? `Function/${state.id}_fun.md` : `.control-tower/runs/${state.id}/spec.md`,
+      enabled ? `Function/${state.id}_fun${state.planRevision>1?'-'+state.planRevision:''}.md` : `.control-tower/runs/${state.id}/spec${state.planRevision>1?'-'+state.planRevision:''}.md`,
       state.spec,
       { newOnly: true, grantId: state.grantId, internal: !enabled },
     );
@@ -807,10 +843,13 @@ export class Workflow {
         };
       });
       void approval.catch(() => {});
-      void this.reviseDesign(state.projectId, "", state.options.imageProvider ?? "gpt", state.options.conversationId).catch(() => {});
+      void this.reviseDesign(state.projectId, "", state.options.imageProvider ?? "gpt", state.options.conversationId).then(async()=>{
+        if(await this.autopilot?.approvesDesign(state)){await this.record(run,'system','직접 저장한 동일 시안 승인 규칙을 재사용했습니다.',{activity:'autopilot'});await this.approveDesign(state.projectId,state.options.conversationId);}
+      }).catch(() => {});
       await approval;
       run.controller.signal.throwIfAborted();
     }
+    if(state.options.engineeringGates&&!await this.testsFirst(run))return;
     state.status = "building";
     await this.record(
       run,
@@ -819,9 +858,44 @@ export class Workflow {
     );
     await this.buildTasks(
       run,
-      state.tasks.map((task) => task.id),
+      state.tasks.filter(task=>!state.options.engineeringGates||task.kind!=='test').map((task) => task.id),
     );
     return this.verifyAndRepair(run);
+  }
+  async criticalChallenge(run,phase,snapshot,plan){
+    const {state}=run,team=teamFor(state.options),chosen=[];
+    const vendor=agent=>{const opts=agentOptions(state.options,agent.id);return modelVendor(agent.provider,agent.modelId??(agent.provider==='grok'?opts.grokRoute?.modelId:opts.gptModel)??'');};
+    for(const agent of phase==='architecture'?[team[0],...team.filter(a=>a.id!=='gpt').sort((a,b)=>Number(!vendor(a))-Number(!vendor(b)))]:[...team.filter(a=>a.roles.includes('critic')&&a.id!=='gpt'),...team.filter(a=>a.id!=='gpt'),team[0]])if(!chosen.some(a=>a.id===agent.id)&&!chosen.some(a=>vendor(a)&&vendor(a)===vendor(agent)))chosen.push(agent);
+    const actors=phase==='architecture'?chosen.slice(0,2):[chosen.find(a=>a.id!=='gpt')??chosen[0]];
+    if(phase==='architecture'&&actors.length===1){const second=team.find(a=>a.id!==actors[0].id);if(second)actors.push(second);}
+    const reportKey=phase==='architecture'?'architectureChallenge':'redTeam',contextHash=digest(JSON.stringify({formal:state.formal?.hash,spec:state.spec,answers:state.options.questionAnswers??[]}));
+    if(state[reportKey]?.snapshotHash===snapshot.hash&&state[reportKey]?.contextHash===contextHash&&state[reportKey]?.status==='passed')return true;
+    state[reportKey]={status:'working',snapshotHash:snapshot.hash,contextHash,diversity:new Set(actors.map(a=>a.provider)).size,reports:[]};
+    await this.record(run,'system',phase==='architecture'?'설계 전제를 다른 공급자의 독립 세션에서 교차 확인합니다.':'구현 전제와 누락 시나리오를 독립 비판 검증자에게 전달합니다.',{activity:'critical-challenge',phase});
+    let failure;const settled=await Promise.allSettled(actors.map(async agent=>{try{
+      const result=await this.callAgent(run,agent.id,'review',{challenge:{phase,formal:state.formal,requirements:state.requirements,userAnswers:state.options.questionAnswers??[],design:plan?.design},snapshot,tasks:plan?.tasks??state.tasks,spec:state.spec,options:state.options,signal:run.controller.signal});
+      const provider=result.executedProvider??agent.provider,model=result.executedModel??agent.modelId;
+      return{...challengeReport(result,state.requirements),actor:agent.id,provider,model,vendor:modelVendor(provider,model??'')};
+    }catch(error){if(!run.controller.signal.aborted){failure=error;run.failure=error;run.controller.abort();}throw error;}}));
+    if(failure)throw failure;run.controller.signal.throwIfAborted();const reports=settled.map(row=>{if(row.status==='rejected')throw row.reason;return row.value;});
+    if((await this.snapshot(run)).hash!==snapshot.hash)throw new Error('독립 검증 중 소스가 바뀌었습니다. 같은 버전에서 다시 검토하세요.');
+    const questions=challengeQuestions(reports),diversity=new Set(reports.map(r=>r.vendor).filter(Boolean)).size;
+    state[reportKey]={status:questions.length?'questions':'passed',snapshotHash:snapshot.hash,contextHash,diversity,reports,independence:'separate read-only session; may share a provider with code authors',limitation:phase==='architecture'&&diversity<2?'서로 다른 공급자가 없어 교차 벤더 합의는 검증하지 못했습니다. 별도 읽기 전용 세션의 검토입니다.':null};
+    await this.record(run,'gpt',reports.map(r=>`${PROVIDER_NAMES[r.provider]}: ${r.summary}`).join('\n'),{activity:'critical-challenge',phase});
+    if(questions.length){state.status='needs_input';state.questions=clarificationQuestions(questions);state.questionBatchId=randomUUID();state.questionSource='critical-challenge';await this.record(run,'gpt','전제·예외 조건에 대한 답변이 필요합니다. 구현 또는 후속 검토를 중지했습니다.',{questions:state.questions});return false;}
+    return true;
+  }
+  async testsFirst(run){
+    const {state}=run,tests=state.tasks.filter(task=>task.kind==='test');
+    if(!state.testing?.plan||!tests.length)throw new Error('구현 전에 테스트 담당과 테스트 계획이 필요합니다.');
+    state.status='testing';state.testFirst={status:'authoring'};
+    const dependencies=tests.map(t=>t.dependsOn);tests.forEach(t=>{t.dependsOn=[];t.instructions+='\nTDD: Author meaningful tests for the declared interfaces BEFORE implementation exists. Import missing planned modules inside the named test callbacks. Preserve existing tests; never manufacture red with assert.fail, throw Error, dummy assertions or syntax errors.';});
+    try{await this.buildTasks(run,tests.map(t=>t.id));}finally{tests.forEach((t,i)=>t.dependsOn=dependencies[i]);}
+    const frozen=await this.snapshot(run);
+    const result=await this.validate({projectId:state.projectId,grantId:state.grantId,options:state.options,signal:run.controller.signal,onOutput:event=>this.notify({type:'agent-progress',projectId:state.projectId,conversationId:state.options.conversationId,agentId:tests[0].owner,...event})});
+    if((await this.snapshot(run)).hash!==frozen.hash)throw new Error('Red 테스트 실행 중 소스가 변경됐습니다.');
+    let red;try{red=assertRedTests(result,state.testing.plan);}catch(error){state.testFirst={status:'blocked',summary:error.message,result};throw error;}state.testFirst={...red,result,hashes:Object.fromEntries(state.testing.plan.files.map(path=>[path,frozen.files.find(row=>row.path===path)?.hash]))};
+    await this.record(run,tests[0].owner,state.testFirst.summary,{activity:'test-first'});return true;
   }
   async reviewVisual(run,frozen){
     const {state}=run,previous=state.visual;
@@ -836,6 +910,7 @@ export class Workflow {
       const evidence=await this.visualCapture.capture({projectId:state.projectId,grantId:state.grantId,runId:state.id,round:state.round,referencePath:state.design.path,referenceHash:state.design.hash,sourceHash:frozen.hash,options:state.options,signal:run.controller.signal});
       if(evidence.sourceHash!==frozen.hash||evidence.referenceHash!==state.design.hash)throw new Error('현재 소스와 같은 시안 비교 캡처가 아닙니다.');
       state.visual={...state.visual,evidence,status:'reviewing',summary:'UI 담당 AI가 시안과 구현 화면을 항목별로 비교합니다.'};
+      if(evidence.unverifiedSource)throw new Error('기존 서버의 캡처는 저장했지만 현재 소스와의 연결이 미확인입니다. 앱이 실행한 프리뷰 서버를 사용해야 자동 일치 완료로 처리할 수 있습니다.');
       await this.record(run,tasks[0].owner,state.visual.summary,{activity:'visual-review'});
       if(!run.forceVisual&&previous?.status==='matched'&&previous.evidence?.actual.hash===evidence.actual.hash&&previous.evidence.referenceHash===evidence.referenceHash){
         state.visual={...previous,evidence,reused:true,summary:'동일한 시안·구현 이미지의 이전 AI 판정을 재사용했습니다.'};
@@ -848,11 +923,34 @@ export class Workflow {
         state.visual={...state.visual,...verdict,status:verdict.verdict==='match'?'matched':verdict.verdict==='mismatch'?'mismatch':'blocked',provider:result.executedProvider,model:result.executedModel,actor:tasks[0].owner,reused:false};
       }
       run.forceVisual=false;
+      for(const item of evidence.states??[]){
+        if(item.regression?.status!=='changed'||!item.comparison)continue;
+        const bytes=await this.workspace.read(state.projectId,item.comparison.path,{grantId:state.grantId,internal:true,maxBytes:16*1024*1024});if(digest(bytes)!==item.comparison.hash)throw new Error('상태별 비교 이미지가 변경됐습니다.');
+        const result=await this.callAgent(run,tasks[0].owner,'review',{snapshot:frozen,tasks,task:tasks[0],options:state.options,signal:run.controller.signal,spec:state.spec,designImage:bytes.toString('base64'),visualComparison:{viewport:item.comparison.viewport,panels:'LEFT user-approved state baseline; RIGHT actual current state',profile:item.profile,metrics:item.metrics,regression:item.regression}});
+        item.review=validateVisualReview(result,tasks,state.design.path);
+        if(item.review.verdict==='unverifiable')throw new Error(`${item.id} 상태의 회귀 차이를 판단하지 못했습니다.`);
+        if(item.review.verdict==='mismatch')state.visual={...state.visual,status:'mismatch',summary:item.id+' 상태의 회귀 차이를 확인했습니다.',issues:[...(state.visual.issues??[]),...item.review.issues]};
+      }
+      if(evidence.states?.some(row=>row.metrics.overflow)){
+        const task=tasks[0],file=(task.writePaths??[]).find(path=>/\.(?:css|[jt]sx?|html)$/.test(path));
+        if(!file)throw new Error('모바일·상태 화면의 가로 넘침을 담당 UI 파일에 연결하지 못했습니다.');
+        state.visual={...state.visual,status:'mismatch',summary:'상태별 화면에서 가로 넘침이 확인됐습니다.',issues:[...(state.visual.issues??[]),{taskId:task.id,owner:task.owner,file,description:'상태별 캡처의 가로 넘침을 수정하세요. '+evidence.states.filter(row=>row.metrics.overflow).map(row=>row.id+': '+row.profile.width+'px').join(', ')}]};
+      }
       if((await this.snapshot(run)).hash!==frozen.hash||!await this.visualCapture.stable(state.projectId,state.grantId,evidence))throw new Error('시안 검토 중 소스·리소스가 바뀌었습니다.');
       await this.record(run,tasks[0].owner,state.visual.summary,{activity:'visual-review',visualStatus:state.visual.status});
     }catch(error){
       run.controller.signal.throwIfAborted();
       state.visual={...state.visual,status:'blocked',summary:redact(error.message),requiresPreviewConsent:error.requiresPreviewConsent===true};
+      if(error.diagnostics){
+        state.visual.diagnostics=redactData(error.diagnostics);
+        const log=JSON.stringify(state.visual.diagnostics);
+        const actionable=!error.requiresPreviewConsent&&!error.requiresPreviewSetup&&/SyntaxError|ReferenceError|TypeError|failed to compile|Module not found|Cannot find module|미리보기 스크립트|개발 서버 응답|컴포넌트|상태 동작/i.test(error.message+' '+log)&&!/Cannot find module ['"](?:vite|next)|(?:vite|next|react-scripts).*not found|EACCES|ENOENT.*node_modules|Missing script/i.test(log);
+        if(actionable){
+          const result=validateReview(await this.callAgent(run,tasks[0].owner,'review',{snapshot:frozen,tasks,task:tasks[0],renderFailure:state.visual.diagnostics,spec:state.spec,options:state.options,signal:run.controller.signal}),tasks,state.ownership);
+          for(const issue of result.issues){const task=tasks.find(t=>t.id===issue.taskId);if(!issue.file||!task?.writePaths?.includes(issue.file)||/package|(?:^|\/)(?:tests?|__tests__)\//i.test(issue.file))throw new Error('렌더 오류 보정은 선언한 UI 코드에만 배정할 수 있습니다.');}
+          if(result.issues.length)state.visual={...state.visual,status:'mismatch',renderFailure:true,summary:result.summary,issues:result.issues};
+        }
+      }
       await this.record(run,'system','시안 일치 확인 필요 · '+state.visual.summary,{activity:'visual-review'});
     }
     return state.visual;
@@ -873,6 +971,11 @@ export class Workflow {
   async verifyAndRepair(run){
     const {state}=run;
     while (true) {
+      if(state.options.engineeringGates){
+        const source=await this.snapshot(run);
+        if(!await this.criticalChallenge(run,'red-team',source))return;
+        if(state.testFirst?.hashes)for(const [path,hash]of Object.entries(state.testFirst.hashes))if(source.files.find(row=>row.path===path)?.hash!==hash)throw new Error('구현 전에 확정한 테스트가 변경됐습니다. 명세와 테스트를 다시 검토하세요.');
+      }
       state.status = "validating";
       state.reviewChain = [];
       state.reviews = [];
@@ -928,6 +1031,7 @@ export class Workflow {
           summary:
             "검증 중 소스가 변경되어 검증 결과를 현재 파일에 적용할 수 없습니다.",
         };
+      if(state.testFirst)state.testFirst.status=state.validation.passed&&!state.validation.stale?'green':'retest-failed';
       if (state.mutation) {
         if (state.validation.stale)
           state.mutation = { ...state.mutation, passed: false, status: "blocked", summary: "검증 중 소스가 변경되었습니다." };
@@ -1132,6 +1236,7 @@ export class Workflow {
       state.reviews = [];
       await this.record(run, "system", "저장된 테스트를 다시 실행합니다.");
       run.promise = (async () => {
+        if(state.options.engineeringGates){if(!state.formal?.validation||!state.testFirst?.hashes)throw new Error('형식 명세와 구현 전 테스트를 포함한 새 작업이 필요합니다.');for(const [path,hash]of Object.entries(state.testFirst.hashes))if(before.files.find(row=>row.path===path)?.hash!==hash)throw new Error('확정한 테스트가 변경됐습니다. 새 작업으로 검토하세요.');if(!await this.criticalChallenge(run,'red-team',before))return;}
         state.validation = await this.validate({
           projectId,
           grantId: state.grantId,

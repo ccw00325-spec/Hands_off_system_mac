@@ -40,6 +40,8 @@ jobs:
       - run: node scripts/check-fun-ui.mjs
       - run: node scripts/check-role-review-ui.mjs
       - run: node scripts/check-visual-review.mjs
+      - run: node scripts/check-setup-engineering-ui.mjs
+      - run: node scripts/check-modern-preview.mjs
       - run: npm run package:win -- --config.compression=store
       - run: pwsh -NoProfile -File scripts/check-packaged-startup.ps1 -Portable
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -62,6 +64,10 @@ jobs:
             artifacts/two-panel-review.png
             artifacts/four-panel-review.png
             artifacts/visual-review-ui.png
+            artifacts/setup-connected.png
+            artifacts/preview-settings.png
+            artifacts/modern-*.png
+            artifacts/modern-preview-debug.json
           retention-days: 14
   mac:
     if: endsWith(github.repository, '_mac')
@@ -93,6 +99,8 @@ jobs:
       - run: node scripts/check-fun-ui.mjs
       - run: node scripts/check-role-review-ui.mjs
       - run: node scripts/check-visual-review.mjs
+      - run: node scripts/check-setup-engineering-ui.mjs
+      - run: node scripts/check-modern-preview.mjs
       - run: npm run package:mac -- --${{ matrix.arch }} --config.compression=store
       - run: node scripts/verify-package.mjs --mac --arch=${{ matrix.arch }}
       - run: codesign --verify --deep --strict "release-mac/${{ matrix.arch == 'arm64' && 'mac-arm64' || 'mac' }}/CW_Handsoff_sys.app"
@@ -119,6 +127,10 @@ jobs:
             artifacts/two-panel-review.png
             artifacts/four-panel-review.png
             artifacts/visual-review-ui.png
+            artifacts/setup-connected.png
+            artifacts/preview-settings.png
+            artifacts/modern-*.png
+            artifacts/modern-preview-debug.json
           retention-days: 14
   docker:
     if: endsWith(github.repository, '_window')

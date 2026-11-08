@@ -12,6 +12,9 @@ import { createNotifications } from "./notification-view.js";
 import { requestIssues, createRequestAlerts } from './request-readiness.js';
 import { createPrerequisiteWatch } from './prerequisite-watch.js';
 import { createVisualView } from './visual-view.js';
+import {createSetupView} from './setup-view.js';
+import {modelUsageLabel} from '../core/model-usage.js';
+import {createAdvancedView} from './advanced-view.js';
 import { displayedTeam } from "./desk-state.js";
 import {createGuide} from './guide.js';
 import { createClarifications } from './clarification-view.js';
@@ -95,11 +98,20 @@ let preferences = null,
 const activeRuns = new Map(),
   pendingChats = new Map(),
   liveBuffers = new Map();
+let setupReport=null;
+const setupView=createSetupView({
+ open:async tab=>{showPrerequisites(await call(api.prerequisites()));setupView.select(tab);},
+ install:id=>{const button=document.querySelector(`[data-tool="${id}"] .prerequisite-actions button`);button?.scrollIntoView({block:'center'});button?.click();},
+ login:async(id,reopen)=>{await refreshStatus();const selector=reopen?`#${id==='gpt'?'codex':id}-login-browser`:`#${id==='gpt'?'codex':id}-login`;const button=$(selector);if(button&&!button.disabled)button.click();else throw new Error('공식 로그인 연결을 먼저 확인하세요.');},
+ model:id=>{const control=$('#'+id+'-model')??$('#'+(id==='gpt'?'codex':id)+'-login');control?.scrollIntoView({block:'center'});control?.focus();},
+ saveTeam:async team=>{if(team.some(a=>a.provider==='grok'&&a.roles.includes('ui'))&&!await call(api.confirmCursorUIRole()))throw new Error('UI 구현 담당을 다른 AI로 선택하세요.');teamConfig=await call(api.setTeam(projectData.activeId,team));renderAssignedRoles();},close:()=>closePrerequisites(),
+});
 desk = createAgentDesk({ onAction: missionAction });
 notifications = createNotifications(api, handleNotification);
+const advancedView=createAdvancedView({api,call,projectId:()=>projectData?.activeId,currentRun:()=>currentRun,notice:toast});
 createGuide(missionAction);
 const clarificationUI = createClarifications({
-  submit: (run, answers) => call(api.answerQuestions(run.projectId, run.options.conversationId, run.id, run.questionBatchId, answers)),
+  submit: (run, answers,remember) => call(api.answerQuestions(run.projectId, run.options.conversationId, run.id, run.questionBatchId, answers,remember)),
   changed: state => {
     activeRuns.set(state.projectId, state);
     if (state.projectId === projectData?.activeId && state.options.conversationId === currentConversation?.id) {
@@ -170,7 +182,7 @@ async function busy(button, text, task) {
   }
 }
 function openConnections() {
-  if (!$("#connections").open) $("#connections").showModal();
+  void call(api.prerequisites()).then(report=>{showPrerequisites(report);setupView.select('accounts');}).catch(error=>toast(error.message,'error'));
 }
 function activeProject() {
   return projectData.items.find(
@@ -420,10 +432,11 @@ async function refreshStatus(prepared) {
     void call(api.refreshModelCatalog()).then(applyModelCatalog).catch(()=>{});
   if (usageData) renderUsage(usageData);
   updateReadiness();
+  setupView.settled();setupView.render({report:setupReport,connection,team:teamConfig??[],projectId:projectData?.activeId});
   return status;
 }
 
-$("#open-connections").addEventListener("click", openConnections);
+$("#open-connections").addEventListener("click", () => {void call(api.prerequisites()).then(report=>showPrerequisites(report,'overview')).catch(error=>toast(error.message,'error'));});
 document
   .querySelectorAll(".connect-shortcut")
   .forEach((button) => button.addEventListener("click", openConnections));
@@ -432,7 +445,7 @@ $("#close-connections").addEventListener("click", () => {
   $("#image-api-key").value = "";
 });
 $("#finish-connections").addEventListener("click", () => {
-  $("#connections").close();
+  closePrerequisites();
   $("#image-api-key").value = "";
 });
 $("#connections").addEventListener("close", () => {
@@ -720,6 +733,7 @@ async function initialize() {
     );
   } else {
     api.onEvent(async (event) => {
+      setupView.event(event);
       if (event.type === 'answer-required') { await handleNotification(event); return; }
       if (event.type === 'system-notification-unavailable') {
         toast('시스템 알림을 표시하지 못했습니다. 종 아이콘의 ‘질문에 답변하기’를 이용하고 OS 알림 설정을 확인해 주세요.');
@@ -1060,6 +1074,7 @@ async function loadApprovedPreview(run) {
 }
 function renderWorkflow(run) {
   currentRun = run;
+  advancedView.render(run);
   $('#review-chain-panel').hidden = !run?.reviewChain?.length;
   $('#review-chain-list').replaceChildren(...(run?.reviewChain??[]).map((step,index)=>{
     const item=document.createElement('li');item.dataset.reviewActor=step.actor;item.dataset.reviewStatus=step.status;
@@ -1611,6 +1626,7 @@ function renderAssignedRoles() {
 }
 function refreshMission() {
   const team = currentDisplayTeam();
+  setupView.render({report:setupReport,connection,team:teamConfig??team,projectId:projectData?.activeId});
   mission.update({
     run: currentRun, team,
     projectId: projectData?.activeId,
@@ -2500,11 +2516,13 @@ const prerequisiteWatcher = createPrerequisiteWatch({
   visible: () => $('#prerequisites-dialog').open && !document.hidden,
 });
 document.addEventListener('visibilitychange', () => { if (!document.hidden) void prerequisiteWatcher.check(); });
-function showPrerequisites(report) {
+function showPrerequisites(report,tab='tools') {
+  setupView.select(tab);
   if (!$('#prerequisites-dialog').open) $('#prerequisites-dialog').showModal();
   prerequisiteWatcher.open(report);
 }
 function renderPrerequisites(report, { intents, checking }) {
+  setupReport=report;setupView.render({report,connection,team:teamConfig??[]});
   const list = $('#prerequisites-list');
   const missing = report.rows.filter(row => row.required && row.state !== 'ready');
   const summary = $('#prerequisites-required');summary.dataset.ready = String(!missing.length);
@@ -2537,15 +2555,16 @@ function renderPrerequisites(report, { intents, checking }) {
     if (!view.button.disabled) view.button.textContent = row.state === 'ready' ? '공식 안내' : '설치 안내 열기';
   }
   for (const [id, view] of prerequisiteRows) if (!report.rows.some(row => row.id === id)) { view.item.remove(); prerequisiteRows.delete(id); }
-  $('#continue-prerequisites').textContent = missing.length ? '설정·연결만 확인하기' : '준비 완료 · 시작하기';
+  $('#continue-prerequisites').textContent = missing.length ? '설정·연결만 확인하기' : setupView.remaining?'프로그램 준비 완료 · AI 연결하기':'준비 완료 · 시작하기';
 }
 function closePrerequisites() {
   prerequisiteWatcher.close();
   sessionStorage.setItem('tower-setup-seen', '1'); $('#prerequisites-dialog').close();
+  $('#image-api-key').value='';$('#gemini-image-api-key')?.value && ($('#gemini-image-api-key').value='');
   if (!localStorage.getItem('tower-tour-v1')) startTour();
 }
 $('#close-prerequisites').addEventListener('click', closePrerequisites);
-$('#continue-prerequisites').addEventListener('click', closePrerequisites);
+$('#continue-prerequisites').addEventListener('click', () => {if(!setupReport?.needsAttention&&setupView.remaining)setupView.select('accounts');else closePrerequisites();});
 $('#prerequisites-dialog').addEventListener('cancel', event => { event.preventDefault(); closePrerequisites(); });
 for (const selector of ['#open-prerequisites', '#open-prerequisites-header']) {
   const button = $(selector);

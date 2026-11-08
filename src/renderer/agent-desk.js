@@ -1,6 +1,7 @@
 import { PROVIDERS, CAPABILITIES, teamFor } from "../core/team.js";
 import { agentRows } from "./desk-state.js";
 import { providerIcon } from "./provider-icon.js";
+import {modelUsageLabel} from '../core/model-usage.js';
 const $ = (selector) => document.querySelector(selector);
 const node = (tag, text, cls) => {
   const item = document.createElement(tag);
@@ -331,6 +332,10 @@ export function createAgentDesk({ onAction }) {
             );
             model.title = agent.modelId || "현재 AI 계정의 자동 선택 모델";
             identity.append(model);
+            const usage=node('div',undefined,'desk-model-usage');usage.dataset.modelUsage=agent.id;
+            for(const item of Object.values(agent.usage?.models??{}))usage.append(node('small',modelUsageLabel(item)));
+            if(!Object.keys(agent.usage?.models??{}).length)usage.append(node('small','사용량 · 요청 완료 시 공급자 집계 반영'));
+            identity.append(usage);
             const switched = agent.usingFallback;
             if (switched)
               identity.append(

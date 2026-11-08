@@ -103,6 +103,7 @@ export function agentRows(run, team, connections = {}) {
       ...agent,
       connected: !!connections[agent.provider]?.connected,
       switched: !!run?.options?.runtimeRoutes?.[agent.id],
+      usage:run?.usage?.byPanel?.[agent.id],
       tasks,
       recent,
       older: tasks.filter((task) => !recent.includes(task)),

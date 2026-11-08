@@ -24,6 +24,9 @@ import { Workspace, digest } from "./core/workspace.js";
 import { listCheckpoints, restoreCheckpoint, verifiedCheckpoint } from "./core/checkpoints.js";
 import { Workflow } from "./core/workflow.js";
 import { VisualCapture } from './core/visual-capture.js';
+import { PreviewServers,DEFAULT_PREVIEW_PROFILES } from './core/preview-server.js';
+import { VisualRegression } from './core/visual-regression.js';
+import { Autopilot } from './core/autopilot.js';
 import { GPTProvider, ClaudeProvider } from "./core/providers.js";
 import { CursorProvider } from "./core/cursor-provider.js";
 import { CursorConnection } from "./core/cursor.js";
@@ -98,6 +101,7 @@ let window,
   usage;
 let preferences, conversations, agentChat, auxiliary;
 let prerequisites;
+let previewServers,visualRegression,autopilot;
 let visualCapture;
 let prerequisiteScan, prerequisiteSource = 'codex';
 let quota;
@@ -482,6 +486,9 @@ async function executionOptions(id) {
     unattended: settings.unattended,
     funContract: true,
     funEnabled: settings.funByDefault,
+    engineeringGates: settings.engineeringGates,
+    autopilotEnabled: settings.autopilotEnabled,
+    previewProfiles: project.previewConfig?.profiles??DEFAULT_PREVIEW_PROFILES,
     team: await roles.getTeam(id),
     roles: await roles.get(id),
     gptSource: current.gpt.source,
@@ -663,6 +670,9 @@ else {
       workspace = new Workspace(projects);
       auxiliary = new AuxiliaryServices(store, projects, workspace, notify);
       preferences = new Preferences(store);
+      autopilot=new Autopilot(store,preferences);
+      previewServers=new PreviewServers(workspace,store);
+      previewServers.executionAllowed=async context=>{const live=await preferences.get();return live.allowExecution&&live.executionBackend===context.options.executionBackend&&(await workspace.grant(context.projectId,context.grantId)).executionApproved===true;};
       conversations = new Conversations(store, projects);
       grok = new CursorProvider(
         store,
@@ -736,8 +746,10 @@ else {
       );
       workflow.designGenerator = generateDesignImage;
       visualCapture=new VisualCapture(workspace,store,{BrowserWindow,session,nativeImage});
+      visualRegression=new VisualRegression(workspace,store,nativeImage);
+      visualCapture.previewServers=previewServers;visualCapture.regression=visualRegression;workflow.autopilot=autopilot;
       workflow.visualCapture={
-        capture:async context=>{const live=await preferences.get();return visualCapture.capture({...context,options:{...context.options,allowExecution:context.options.allowExecution&&live.allowExecution&&live.executionBackend==='host'}});},
+        capture:async context=>{const live=await preferences.get();if(context.options.executionBackend!==live.executionBackend)throw new Error('실행 위치가 바뀌었습니다. 현재 설정으로 다시 비교하세요.');return visualCapture.capture({...context,options:{...context.options,allowExecution:context.options.allowExecution&&live.allowExecution}});},
         stable:(...args)=>visualCapture.stable(...args),
       };
       workflow.quota = quota;
@@ -777,14 +789,33 @@ else {
         if (!Array.isArray(tools) || tools.length > 7 || tools.some(id => !Object.hasOwn(INSTALL_SITES, id))) throw new Error('설치 도구 목록을 확인하세요.');
         prerequisiteScan = (async () => {
         if (options.passive) return passivePrerequisites(tools);
+        const previousReady=new Map((prerequisites.current?.rows??[]).map(row=>[row.id,row.state==='ready']));
         for (const connection of [codex, claude, grok, gemini]) { connection.cache = null; }
         const result = await scanPrerequisites(await status(), await preferences.get(), await projects.list());
-        void refreshCatalog(null, true);
+        for(const row of result.rows)if(['gpt','claude','grok','gemini'].includes(row.id)&&row.state==='ready'&&previousReady.get(row.id)!==true)void refreshCatalog(row.id,true);
         return result;
         })().finally(() => { prerequisiteScan = null; });
         return prerequisiteScan;
       });
       handle('tower:check-work-tools', () => true);
+      handle('tower:autopilot-default',value=>preferences.setAutopilotDefault(value));
+      handle('tower:autopilot-rules',async id=>{projects.find(await projects.list(),id);return autopilot.list(id);});
+      handle('tower:autopilot-remove',async(id,ruleId)=>{projects.find(await projects.list(),id);if(ruleId!==null&&(typeof ruleId!=='string'||ruleId.length>80))throw new Error('삭제할 규칙을 확인하세요.');await autopilot.remove(id,ruleId);return autopilot.list(id);});
+      handle('tower:remember-design',async(id,runId,value)=>{const run=workflow.runs.get(id);if(run?.state.id!==runId||run.state.design?.status!=='ready'||typeof value!=='boolean')throw new Error('현재 준비된 시안의 반복 승인 옵션만 바꿀 수 있습니다.');run.state.rememberDesignApproval=value;await workflow.record(run,'system',value?'직접 승인할 동일 시안의 반복 승인 기억을 선택했습니다.':'시안 승인 기억을 해제했습니다.',{activity:'autopilot-preference'});return value;});
+      handle('tower:preview-settings',async id=>{const info=await previewServers.allowed(id,await executionOptions(id));return{config:info.config,candidates:info.candidates,scripts:info.scripts,script:info.script,command:info.command,allowed:info.allowed};});
+      handle('tower:preview-save',async(id,value)=>{
+        const options=await executionOptions(id),info=await previewServers.fingerprint(id,options,value);
+        const result=await dialog.showMessageBox(window,{type:'warning',title:'프로젝트 미리보기 승인',message:'이 프로젝트의 미리보기 설정을 저장할까요?',detail:`실행 위치: ${options.executionBackend}\n스크립트: ${info.script||'정적 화면 또는 기존 서버'}\n내용: ${info.command||'명령 실행 없음'}\n정리: ${info.cleanupCommand||'관리되는 foreground 프로세스 종료'}\n주소: ${info.config.url||'앱이 확보한 로컬 포트'}\n\n실행 동의가 있는 폴더의 비밀 파일을 제외한 복사본을 사용합니다. Docker는 별도 내부 네트워크·로컬 공개 포트로 격리하고 PC에서 대신 실행하지 않습니다. PC 직접 실행은 OS 사용자 권한입니다. 기존 서버 주소는 소스 연결이 미확인이라 자동 일치 완료로 처리하지 않습니다. 캡처·DOM·오류 로그가 UI 담당 AI에 전달됩니다.`,buttons:['취소','저장·미리보기 허용'],defaultId:0,cancelId:0,noLink:true});
+        if(result.response!==1)return{saved:false};await previewServers.approve(id,await executionOptions(id),value,info.key);await visualCapture.authorize(id,info.grant.grantId,true);return{saved:true};
+      });
+      handle('tower:visual-baseline',async(id,runId,profileId)=>{
+        const state=await workflow.current(id,runId);const result=await dialog.showMessageBox(window,{type:'question',title:'상태별 회귀 기준 승인',message:'현재 캡처를 이 화면 상태의 향후 비교 기준으로 사용할까요?',detail:'원본 시안 승인과 별개입니다. 같은 시안·뷰포트·동작·컴포넌트의 픽셀 변화와 배치 오차를 비교합니다. 현재 소스와 같은 캡처만 저장합니다.',buttons:['취소','이 상태를 기준으로 저장'],defaultId:0,cancelId:0,noLink:true});if(result.response!==1)return false;await visualRegression.approve(state,profileId);return true;
+      });
+      handle('tower:visual-state-image',async(id,runId,profileId)=>{
+        const state=await workflow.current(id,runId),item=state?.visual?.evidence?.states?.find(row=>row.id===profileId),prefix=`.control-tower/runs/${state?.id}/visual/`;
+        if(!item||!item.image.path.startsWith(prefix)||!/^\d+-[a-f0-9-]{36}-[\w-]+-state\.png$/.test(item.image.path.slice(prefix.length)))throw new Error('현재 작업의 화면 상태 캡처를 확인하세요.');
+        const bytes=await workspace.read(id,item.image.path,{grantId:state.grantId,internal:true,maxBytes:16*1024*1024});if(digest(bytes)!==item.image.hash)throw new Error('상태 캡처가 변경됐습니다.');return'data:image/png;base64,'+bytes.toString('base64');
+      });
       handle('tower:call-quota', () => quota.snapshot());
       handle('tower:visual-permission',async(id,runId,allow)=>{
         const state=await workflow.current(id,runId);if(!state?.visual)throw new Error('시안 비교 작업을 확인하세요.');
@@ -1058,11 +1089,11 @@ else {
             return agentChat.send(id, conversationId, agentId, message, mode, mutation, imageProvider, funEnabled);
           }),
       );
-      handle('tower:answer-questions', (id, conversationId, runId, batchId, answers) => exclusive(`chat:${id}:gpt`, async () => {
+      handle('tower:answer-questions', (id, conversationId, runId, batchId, answers, remember=[]) => exclusive(`chat:${id}:gpt`, async () => {
         if (once.has(`history:${id}`)) throw new Error('대화 기록을 정리하는 중입니다.');
         const conversation = await conversations.read(id, conversationId);
         if (conversation.runId !== runId) throw new Error('이 대화의 작업이 아닙니다.');
-        const state = await workflow.answerQuestions(id, runId, batchId, answers, conversationId);
+        const state = await workflow.answerQuestions(id, runId, batchId, answers, conversationId,remember);
         const resolved = state.options.questionAnswers.at(-1).answers;
         await conversations.append(id, conversationId, 'gpt', 'user',
           resolved.map(row => `${row.prompt}\n답변: ${row.value}`).join('\n\n'), 'complete');

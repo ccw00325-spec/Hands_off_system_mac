@@ -7,6 +7,7 @@ import {Projects} from '../src/core/projects.js';
 import {Workspace} from '../src/core/workspace.js';
 import {validateProject} from '../src/core/validation.js';
 import {runMutation} from '../src/core/mutation.js';
+import {PreviewServers} from '../src/core/preview-server.js';
 const parent=await realpath(tmpdir()), base=await mkdtemp(join(parent,'cw-docker-simulation-'));
 const checks=[];
 try {
@@ -39,6 +40,12 @@ test('T4 network denied',async()=>{await new Promise((resolve,reject)=>{const re
     const mutation=await runMutation(workspace,context);assert.equal(mutation.passed,true,JSON.stringify(mutation));
     assert.equal(mutation.total,1);assert.ok(await access(join(root,mutation.reportPath)).then(()=>true,()=>false));
     checks.push('A fresh fixture mutation JSON report returns through bounded stdout and is parsed by the actual mutation pipeline; this is not a Stryker engine benchmark');
+    await writeFile(join(root,'package.json'),JSON.stringify({private:true,scripts:{preview:'node preview.cjs'}}));
+    await writeFile(join(root,'preview.cjs'),`const http=require('node:http'),fs=require('node:fs');http.createServer((req,res)=>{res.setHeader('Content-Type','application/json');res.end(JSON.stringify({ready:true,secretCopied:fs.existsSync('/input/.env'),socket:fs.existsSync('/var/run/docker.sock'),key:process.env.OPENAI_API_KEY??null}));}).listen(Number(process.env.PORT),'0.0.0.0');`);
+    const previews=new PreviewServers(workspace,store),previewOptions={...options};await previews.approve(id,previewOptions,{mode:'script',script:'preview',url:'http://127.0.0.1:15173/',profiles:[]});let preview;
+    try{preview=await previews.start({...context,options:previewOptions,sourceHash:(await workspace.snapshot(id)).hash});const response=await fetch(preview.url),body=await response.json();assert.deepEqual(body,{ready:true,secretCopied:false,socket:false,key:null});assert.equal(preview.unverifiedSource,false);}finally{await preview?.close();}
+    await assert.rejects(fetch('http://127.0.0.1:15173/',{signal:AbortSignal.timeout(1500)}));
+    checks.push('A real managed preview container serves only on a loopback-published port over its own internal bridge; no credentials/socket are copied and teardown closes the endpoint without host execution');
   }
   await mkdir(resolve('artifacts'),{recursive:true});
   await writeFile(resolve('artifacts/docker-isolation-report.json'),JSON.stringify({passed:checks.length,checks,paidCalls:0},null,2));

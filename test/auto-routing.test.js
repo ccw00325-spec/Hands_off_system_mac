@@ -38,7 +38,7 @@ test("new defaults have exclusive implementation owners and shared review/debug/
     [
       ["control", "debug", "review", "test"],
       ["feature", "debug", "review"],
-      ["ui", "review"],
+      ["ui", "review", "critic"],
     ],
   );
   validateTeam(team, { exclusive: true });

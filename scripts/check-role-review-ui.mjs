@@ -20,7 +20,7 @@ try{
       module(file)[name].prototype.status=async()=>({installed:true,connected:true,state:'connected',login:{waiting:false}});
       module(file)[name].prototype.models=async()=>[{id:'fixture-model',name:'Fixture model',current:true}];
     }
-    const Preferences=module('preferences').Preferences,get=Preferences.prototype.get;Preferences.prototype.get=async function(){return{...await get.call(this),onboardingComplete:true,designApproval:false};};
+    const Preferences=module('preferences').Preferences,get=Preferences.prototype.get;Preferences.prototype.get=async function(){return{...await get.call(this),engineeringGates:false,onboardingComplete:true,designApproval:false};};
     dialog.showOpenDialog=async()=>({canceled:false,filePaths:[data.root]});
     globalThis.__roleWarnings=0;globalThis.__allowCursorRole=false;globalThis.__roleReviews=[];
     const show=dialog.showMessageBox;dialog.showMessageBox=(...args)=>{

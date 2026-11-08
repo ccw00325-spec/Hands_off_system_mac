@@ -396,7 +396,7 @@ export class AuxiliaryServices {
         repositoryName(state.repositoryName || project.title, id);
       const requestApproval = async (service, target, action) => {
         if (
-          config.always?.[service] ||
+          config.always?.[service] && ((await this.store.read('preferences',{}))??{}).autopilotEnabled!==false ||
           Object.hasOwn(result.decisions, service)
         )
           return false;

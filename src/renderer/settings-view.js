@@ -12,6 +12,7 @@ export function fillPreferences(value) {
   $('#mutation-by-default').checked = value.mutationByDefault;
   $('#mutation-option').checked = value.mutationByDefault;
   $('#fun-option').checked = value.funByDefault;
+  $('#autopilot-option').checked=value.autopilotEnabled!==false;
   $("#max-concurrent-agents").value = value.maxConcurrentAgents;
   $("#api-budget").value = value.apiBudgetUsd;
   $("#api-rate-model").value = value.apiRateModel;
@@ -46,6 +47,7 @@ export function readPreferences() {
     designMode: $('#design-mode').value,
     mutationByDefault: $('#mutation-by-default').checked,
     funByDefault: $('#fun-option').checked,
+    autopilotEnabled:$('#autopilot-option').checked,
     maxConcurrentAgents: Number($("#max-concurrent-agents").value),
     apiBudgetUsd: Number($("#api-budget").value),
     apiRateModel: $("#api-rate-model").value.trim(),

@@ -24,6 +24,9 @@ async function boot() {
   await application.evaluate((_electron,url)=>{
     const p=process.getBuiltinModule('url').fileURLToPath(url),require=process.getBuiltinModule('module').createRequire(p);
     require(p.replace('codex.js','prerequisites.js')).Prerequisites.prototype.scan=async()=>({rows:[],needsAttention:false,platform:process.platform,arch:process.arch});
+    // This legacy fixture exercises UI roles; engineering gates have separate executable coverage.
+    const EngineeringPreferences=require(p.replace('codex.js','preferences.js')).Preferences,originalGet=EngineeringPreferences.prototype.get;
+    EngineeringPreferences.prototype.get=async function(){return {...await originalGet.call(this),engineeringGates:false};};
     require(p).CodexConnection.prototype.models=async()=>[{id:'fixture-native-model',name:'Fixture model'}];
     require(p).CodexConnection.prototype.status=async()=>({installed:true,connected:true,state:'connected',login:{waiting:false}});
     require(p.replace('codex.js','cursor.js')).CursorConnection.prototype.models=async()=>[{id:'fixture-grok',name:'Cursor fixture model'}];
@@ -158,7 +161,7 @@ try {
   checks.push(
     "Execution, repair limit and terminal preferences persist through dedicated settings",
   );
-  await page.locator("#open-connections").click();
+  await page.locator("#open-connections").click();await page.locator("[data-setup-tab=accounts]").click();
   if (await page.locator("#save-key").isEnabled()) {
     await page.locator("#image-api-key").fill("invalid-test-key-not-a-secret");
     await page.locator("#save-key").click();
@@ -554,7 +557,7 @@ try {
     },
     pathToFileURL(resolve("src/core/providers.js")).href,
   );
-  await page.locator("#open-connections").click();
+  await page.locator("#open-connections").click();await page.locator("[data-setup-tab=accounts]").click();
   await page.locator("#refresh-status").click();
   await page.locator("#finish-connections").click();
   await page.locator("#open-roles").click();
@@ -621,7 +624,7 @@ try {
   await page.locator("#sidebar-images").click();
   assert.equal(await page.locator("#sidebar-images").getAttribute("aria-pressed"), "true");
   await page.locator("#image-provider").selectOption("gemini");
-  await page.locator("#connections[open]").waitFor();
+  await page.locator("#prerequisites-dialog[open]").waitFor();await page.locator("[data-setup-tab=accounts]").click();
   await page.locator("#gemini-auth-status").filter({ hasText: "Google 연결됨" }).waitFor();
   await page.locator("#finish-connections").click();
   await page.locator("#image-prompt").fill("시간 숫자를 더 크게");

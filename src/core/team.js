@@ -11,6 +11,7 @@ export const CAPABILITIES = {
   debug: "디버깅",
   review: "코드 검토",
   test: "테스트 설계·실행",
+  critic:"비판적 검증",
 };
 export const SLOT_IDS = ["gpt", "grok", "claude", "reviewer"];
 export function validateModelId(value) {
@@ -29,7 +30,7 @@ export function defaultTeam(
   return [
     { id: "gpt", provider: roles.gpt, roles: ["control", "debug", "review", "test"] },
     { id: "grok", provider: roles.grok, roles: ["feature", "debug", "review"] },
-    { id: "claude", provider: roles.claude, roles: ["ui", "review"] },
+    { id: "claude", provider: roles.claude, roles: ["ui", "review", "critic"] },
   ];
 }
 export function validateTeam(team, { exclusive = false } = {}) {
@@ -116,7 +117,7 @@ export function resizeTeam(team, count) {
     result.push({
       id: SLOT_IDS[index],
       provider: result[0].provider,
-      roles: index === 2 && !result.some(agent=>agent.roles.includes("ui")) ? ["ui", "review"] : ["debug", "review"],
+      roles: index === 2 && !result.some(agent=>agent.roles.includes("ui")) ? ["ui", "review"] : ["debug", "review", "critic"],
     });
   }
   for (const role of ["feature", "ui"])
@@ -126,6 +127,7 @@ export function resizeTeam(team, count) {
         : result[1]).roles.push(role);
   for (const agent of result)
     agent.roles = [...new Set([...agent.roles, 'debug', 'review', 'test'])];
+  if(!result.some(agent=>agent.roles.includes('critic')))result[1].roles.push('critic');
   return validateTeam(exclusiveTeam(result),{exclusive:true});
 }
 export function agentLabel(agent) {
