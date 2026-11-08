@@ -34,7 +34,8 @@ Windows 포터블에도 Authenticode 코드 서명이 적용되지 않았습니�
 
 - [Node.js·npm](https://nodejs.org/en/download): 이 앱은 24 이상을 확인합니다.
 - [Git Windows](https://git-scm.com/install/windows), [Git Mac](https://git-scm.com/install/mac): GitHub 전송에 사용합니다. Mac에서 설치되지 않은 `/usr/bin/git` 스텁을 실행해 설치창을 강제로 띄우지 않습니다.
-- [Codex CLI](https://developers.openai.com/codex/cli), [Claude Code](https://code.claude.com/docs/en/setup), [Cursor CLI](https://cursor.com/docs/cli/installation), [Gemini CLI](https://geminicli.com/docs/get-started/installation/): 사용할 AI만 설치하고 각자의 계정으로 로그인합니다.
+- [Codex 앱](https://developers.openai.com/codex/app) 또는 [Codex CLI](https://developers.openai.com/codex/cli): Windows Store와 macOS Applications 폴더의 Codex 앱에 포함된 실행 도구도 자동으로 찾습니다. 기존 ChatGPT 인증이 유효하면 다시 로그인할 필요가 없습니다.
+- [Claude Code](https://code.claude.com/docs/en/setup), [Cursor CLI](https://cursor.com/docs/cli/installation), [Gemini CLI](https://geminicli.com/docs/get-started/installation/): 사용할 AI의 실행 도구만 준비하세요. 기존 인증은 자동 확인하고, 추가 승인이 필요하면 앱의 **시작 준비 → 계정·모델**에서 공식 브라우저 로그인을 시작합니다. 터미널에 로그인 명령을 입력할 필요는 없습니다. Claude 데스크톱 앱만 설치한 경우 외부 앱용 Claude Code 실행 도구와 인증이 별도로 필요할 수 있습니다.
 - [Docker](https://docs.docker.com/get-started/get-docker/): 격리 실행에 필요합니다. Desktop의 이용 조건은 [공식 라이선스 안내](https://docs.docker.com/subscription/desktop-license/)를 확인하세요.
 
 설치 파일을 자동 실행하거나 `curl | sh`, PowerShell 원격 설치 스크립트를 앱이 실행하지 않습니다. 설치 페이지는 버튼을 눌렀을 때만 기본 브라우저에서 엽니다. Windows의 기본 설치 위치와 Mac의 Homebrew·`~/.local/bin`·nvm 설치 경로도 검색하므로 새 PATH가 앱에 상속되지 않은 경우를 줄입니다. 임의의 모든 버전 관리자·사용자 지정 경로를 발견한다고 보장하지는 않습니다.

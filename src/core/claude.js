@@ -7,11 +7,13 @@ export class ClaudeConnection {
   constructor(notify = () => {}, dependencies = {}) {
     this.notify = notify;
     this.login = new LoginFlow("claude", notify, dependencies);
+    this.find = dependencies.find ?? (() => findExecutable("claude"));
+    this.spawn = dependencies.spawn ?? spawn;
     this.cache = null;
     this.checking = null;
   }
   async executable() {
-    return findExecutable("claude");
+    return this.find();
   }
   async status({ force = false } = {}) {
     if (!force && this.cache && Date.now() - this.cache.at < 30000)
@@ -32,7 +34,7 @@ export class ClaudeConnection {
     if (!executable)
       return { installed: false, connected: false, state: "not-installed" };
     return new Promise((resolve) => {
-      const child = spawn(executable, ["auth", "status", "--json"], {
+      const child = this.spawn(executable, ["auth", "status", "--json"], {
         env: nativeEnvironment(),
         windowsHide: true,
         shell: false,
@@ -74,10 +76,10 @@ export class ClaudeConnection {
       return {
         reused: true,
         connected: true,
-        message: "터미널의 Claude 로그인을 재사용합니다.",
+        message: "이 PC의 Claude Code 로그인을 재사용합니다. 터미널을 열 필요가 없습니다.",
       };
     const executable = await this.executable();
-    if (!executable) throw new Error("먼저 공식 Claude Code를 설치하세요.");
+    if (!executable) throw new Error("공식 Claude Code 실행 도구가 필요합니다. Claude 데스크톱 앱만 설치한 경우 별도 설치가 필요할 수 있습니다. 시작 준비의 설치 안내를 확인하세요.");
     return this.login.start(executable, ["auth", "login"], () =>
       this.status({ force: true }),
     );

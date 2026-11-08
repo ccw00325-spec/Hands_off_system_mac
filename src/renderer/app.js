@@ -376,14 +376,15 @@ async function refreshStatus(prepared) {
   if (status.claude.connected)
     message(
       "#claude-message",
-      "터미널에 저장된 Claude 로그인을 사용합니다. 다시 로그인할 필요가 없습니다.",
+      "이 PC의 Claude Code 로그인을 확인했습니다. 터미널을 열거나 다시 로그인할 필요가 없습니다.",
       "success",
     );
   else if (!status.claude.installed)
     message(
       "#claude-message",
-      "공식 Claude Code를 설치한 후 상태 다시 확인을 눌러주세요.",
+      "Claude Code 실행 도구가 필요합니다. Claude 데스크톱 앱만 설치한 경우 설치 안내에서 별도로 준비하세요.",
     );
+  else message("#claude-message", status.claude.login?.waiting ? "공식 브라우저에서 로그인을 완료하세요." : "기존 Claude Code 인증을 확인하지 못했습니다. 연결하기를 눌러 공식 브라우저에서 승인하세요.");
   pill(
     "#grok-auth-status",
     status.grok.connected
@@ -1283,7 +1284,7 @@ function renderCliLogin(provider, status = {}) {
     : provider === "grok" && status.installed
       ? "Cursor 로그인 ↗"
       : connected
-        ? "터미널 로그인 연결됨"
+        ? "이 PC 로그인 연결됨"
         : status.installed
           ? "연결하기 ↗"
           : "공식 CLI 설치 필요";
@@ -2279,6 +2280,7 @@ function renderCodexConnection(status) {
       "현재 OS 사용자의 ChatGPT 구독을 사용합니다. 같은 GPT로 여러 패널을 배정해도 로그인은 한 번이면 됩니다.",
       "success",
     );
+  else message("#codex-message", !cli.installed ? "Codex 앱 또는 공식 Codex 실행 도구가 필요합니다. 설치 후 자동으로 다시 확인합니다." : cli.login?.waiting ? "공식 ChatGPT 브라우저에서 승인을 완료하세요." : "이 PC의 Codex 인증을 확인하지 못했습니다. ChatGPT 연결을 눌러 공식 브라우저에서 승인하세요.");
   if (renderedGptSource && renderedGptSource !== status.gpt.source)
     $("#gpt-model").replaceChildren(new Option("GPT 모델 선택", ""));
   renderedGptSource = status.gpt.source;

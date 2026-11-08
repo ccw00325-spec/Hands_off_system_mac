@@ -9,10 +9,13 @@ import { terminateTree } from "./processes.js";
 import { nativeEnvironment } from "./child-env.js";
 import { validateModelId } from "./team.js";
 import { providerFailure } from "./provider-errors.js";
+import { findDesktopCodex, isCodexAppAlias } from "./desktop-codex.js";
 
 export async function findCodex() {
   const discovered = await findExecutable("codex");
-  if (discovered) return discovered;
+  // Windows Store app aliases can launch the GUI rather than speak app-server.
+  // Use the registered application's actual engine in that case.
+  if (discovered && !isCodexAppAlias(discovered)) return discovered;
   if (process.platform === "win32" && process.env.LOCALAPPDATA) {
     const path = join(
       process.env.LOCALAPPDATA,
@@ -27,7 +30,7 @@ export async function findCodex() {
       return path;
     } catch {}
   }
-  return null;
+  return findDesktopCodex();
 }
 export function codexExecArgs(model) {
   if (model !== undefined) validateModelId(model);
@@ -229,7 +232,7 @@ export class CodexConnection {
       };
     if (this.pending) throw new Error("공식 로그인이 진행 중입니다.");
     const rpc = await this.server();
-    if (!rpc) throw new Error("공식 Codex CLI 설치가 필요합니다.");
+    if (!rpc) throw new Error("Codex 앱 또는 공식 Codex 실행 도구가 필요합니다. 시작 준비에서 설치 안내를 열어 주세요.");
     const result = await rpc.request("account/login/start", {
       type: "chatgpt",
       useHostedLoginSuccessPage: true,

@@ -793,7 +793,7 @@
             <span class="agent-icon"><img class="provider-logo provider-logo-gpt" src="assets/provider-gpt.svg" alt="GPT" width="28" height="28" /></span>
             <div>
               <h3>GPT · Codex 로그인</h3>
-              <p>이 PC의 터미널 인증 재사용 · 한 로그인으로 여러 세션</p>
+              <p>이 PC의 Codex 앱·실행 도구 로그인 자동 확인</p>
             </div>
             <span id="codex-auth-status" class="status-pill">확인 중</span>
           </div>
@@ -803,7 +803,7 @@
             <option value="api">고급 · 앱의 별도 ChatGPT OAuth</option>
           </select>
           <p id="codex-message" class="hint">
-            현재 OS 사용자의 Codex 로그인을 확인합니다.
+            Codex 앱에 포함된 실행 도구도 자동으로 찾습니다. 로그인 확인이 끝나면 터미널 없이 연결됩니다.
           </p>
           <div class="action-row">
             <button id="codex-login">ChatGPT 연결 ↗</button
@@ -832,14 +832,14 @@
             <span class="agent-icon sand">✳</span>
             <div>
               <h3>Claude Code</h3>
-              <p>터미널의 저장된 로그인을 자동으로 사용</p>
+              <p>기존 Claude Code 인증 재사용 · 터미널 입력 없이 연결</p>
             </div>
             <span class="status-pill" id="claude-auth-status">확인 중</span>
           </div>
           <p id="claude-message" class="hint">
-            먼저 기존 CLI 연결을 확인합니다. 없을 때만 공식 로그인 화면을
-            엽니다.
+            기존 Claude Code 인증을 먼저 확인하고, 필요할 때만 공식 브라우저 승인을 요청합니다.
           </p>
+          <p class="hint">Claude 데스크톱 앱의 로그인은 별도로 관리될 수 있습니다. 외부 앱용 Claude Code 실행 도구가 없으면 설치 안내를 이용하세요. 데스크톱 앱 설치만으로 연결됨을 표시하지 않습니다.</p>
           <div class="action-row">
             <button id="claude-login">연결하기 ↗</button
             ><button id="claude-reauth" class="text-button" hidden="">

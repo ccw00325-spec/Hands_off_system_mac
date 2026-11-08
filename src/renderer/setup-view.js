@@ -34,7 +34,7 @@ export function createSetupView({open,install,login,model,saveTeam,close}){
    else if(waiting){description.textContent=status.login.codeRequired?'브라우저 승인 코드를 계정·모델 화면에 입력하세요.':status.login.hasBrowserLink?'브라우저에서 공식 승인을 완료해 주세요.':'공식 로그인 주소를 준비하고 있어요.';button.textContent=status.login.codeRequired?'승인 코드 입력':status.login.hasBrowserLink?'브라우저 다시 열기':'계정 연결 상태 보기';action=()=>status.login.codeRequired||!status.login.hasBrowserLink?select('accounts'):login(id,true);}
    else if(!status.connected){description.textContent='설치됐어요. 이제 계정을 연결하세요.';button.textContent=name+'에 로그인';action=()=>login(id,false);}
    else if(needsModel){description.textContent='연결됐어요. 사용할 모델을 선택하세요.';button.textContent='모델 선택';action=()=>{select('accounts');model(id);};}
-   else{description.textContent='사용 가능 ✓ · 기존 인증 재사용';button.textContent='연결·모델 설정';action=()=>{select('accounts');model(id);};card.dataset.ready='true';}
+   else{description.textContent=['gpt','claude'].includes(id)?'사용 가능 ✓ · 이 PC의 기존 로그인 확인 완료':'사용 가능 ✓ · 기존 인증 재사용';button.textContent='연결·모델 설정';action=()=>{select('accounts');model(id);};card.dataset.ready='true';}
    button.onclick=()=>run(action,button);card.append(title,description,button);cards.append(card);if(card.dataset.ready!=='true')pending.push({text:name+' 연결 준비',action,button});
   }
   const missing=next.report?.rows.filter(r=>r.required&&r.state!=='ready')??[];
