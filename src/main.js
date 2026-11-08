@@ -897,7 +897,7 @@ else {
         exclusive("account", async() => {const result=await auth.select(id);void refreshCatalog('gpt',true);return result;}),
       );
       handle("tower:sign-out", () =>
-        exclusive("account", async() => {const result=await auth.signOut();void refreshCatalog('gpt',true);return result;}),
+        exclusive("account", async() => {const result=await auth.signOut();connectionHealth.invalidate('gpt');void refreshCatalog('gpt',true);return result;}),
       );
       handle("tower:claude-login", (forceLogin) =>
         claude.connect({ forceLogin: forceLogin === true }),

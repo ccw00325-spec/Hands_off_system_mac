@@ -29,7 +29,7 @@ test('late status responses cannot resurrect a disconnected card or stale contro
  assert.equal(mergeConnectionStatus(null,{codex:{connected:true,checkedAt:1},gpt:{source:'codex',connected:true}},16002).gpt.connected,false);const merged=mergeConnectionStatus(current,stale);assert.equal(merged.gpt.connected,false);assert.equal(merged.grok.connected,false);assert.equal(mergeConnectionStatus(merged,{...stale,grok:{connected:true,authRevision:9}}).grok.connected,true);
 });
 test('fresh installation/model metadata remains usable while old authentication is still disconnected',()=>{
- const health=new ConnectionHealth({});health.seed('grok',{installed:false,connected:false,modelId:null});const value=health.view('grok',{installed:true,connected:true,modelId:'new-model'});assert.equal(value.installed,true);assert.equal(value.modelId,'new-model');assert.equal(value.connected,false);
+ const health=new ConnectionHealth({});health.seed('grok',{installed:false,connected:false,modelId:null});const value=health.view('grok',{installed:true,connected:true,modelId:'new-model'});assert.equal(value.installed,true);assert.equal(value.modelId,'new-model');assert.equal(value.connected,false);const signed=new ConnectionHealth({});signed.seed('gpt',{connected:true});assert.equal(signed.view('gpt',{connected:false}).connected,false);
 });
 test('a provider authentication error immediately invalidates its actual route and does not trigger quota fallback',async()=>{
  const revoked=[],routes=roleProviders({grok:{chat:async()=>{throw providerFailure('grok',{code:'unauthorized'},'login required');}}},{onAuthenticationFailure:id=>revoked.push(id)});
