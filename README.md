@@ -31,8 +31,8 @@ AI마다 같은 요구사항을 다시 설명하고, 한쪽에서 만든 코드�
 
 | 사용할 PC | 저장소 | 앱 다운로드 |
 | --- | --- | --- |
-| Windows x64 | [Windows 저장소](https://github.com/ccw00325-spec/Hands_off_system_window) | [Windows 실행 파일 받기](https://github.com/ccw00325-spec/Hands_off_system_window/actions/runs/42492399470) |
-| MacBook · Apple Silicon / Intel | [Mac 저장소](https://github.com/ccw00325-spec/Hands_off_system_mac) | [Mac 패키지 받기](https://github.com/ccw00325-spec/Hands_off_system_mac/actions/runs/42492403419) |
+| Windows x64 | [Windows 저장소](https://github.com/ccw00325-spec/Hands_off_system_window) | [Windows 실행 파일 받기](https://github.com/ccw00325-spec/Hands_off_system_window/actions/runs/42496253190) |
+| MacBook · Apple Silicon / Intel | [Mac 저장소](https://github.com/ccw00325-spec/Hands_off_system_mac) | [Mac 패키지 받기](https://github.com/ccw00325-spec/Hands_off_system_mac/actions/runs/42496257754) |
 
 다운로드 페이지에서 GitHub에 로그인하고 아래쪽 **Artifacts**를 펼치세요. Windows는 `Hands-off-Window-x64`, Mac은 CPU에 맞게 `Hands-off-Mac-arm64` 또는 `Hands-off-Mac-x64`를 선택합니다. 받은 압축 파일을 풀고 Windows는 `.exe`, Mac은 `.dmg` 또는 `.zip` 안의 앱을 실행하세요. Mac CPU는 **Apple 메뉴 → 이 Mac에 관하여**에서 확인할 수 있습니다. 파일 보관 기간은 30일입니다.
 
