@@ -321,6 +321,7 @@ export class CursorConnection {
         modelId: model,
       });
       const { signal: _signal, designImage, ...data } = context;
+      if(designImage&&!init.agentCapabilities?.promptCapabilities?.image)throw new Error('선택한 Cursor 연결은 이미지 입력을 지원하지 않아 시안을 검토할 수 없습니다.');
       const payload = { ...data, snapshot: { ...data.snapshot, root: "." } };
       const result = await rpc.request(
         "session/prompt",

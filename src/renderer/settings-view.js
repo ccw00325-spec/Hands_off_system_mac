@@ -21,6 +21,7 @@ export function fillPreferences(value) {
   $("#allow-execution").checked = value.allowExecution;
   $("#unattended-mode").checked = value.unattended;
   $("#design-approval").checked = value.designApproval;
+  $('#visual-review-default').checked = value.visualReview !== false;
   $("#terminal-font-size").value = String(value.terminalFontSize);
   $("#wrap-lines").checked = value.wrapLines;
   document.documentElement.style.setProperty(
@@ -54,6 +55,7 @@ export function readPreferences() {
     allowExecution: $("#allow-execution").checked,
     unattended: $("#unattended-mode").checked,
     designApproval: $("#design-approval").checked,
+    visualReview: $('#visual-review-default').checked,
     terminalFontSize: Number($("#terminal-font-size").value),
     wrapLines: $("#wrap-lines").checked,
   };

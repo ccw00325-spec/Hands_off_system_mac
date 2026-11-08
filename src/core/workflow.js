@@ -11,6 +11,7 @@ import { runMutation } from "./mutation.js";
 import { testPlanMarkdown } from "./test-plan.js";
 import { stateHandoff, compactHandoff } from './handoff.js';
 import { layoutPreview } from './layout-preview.js';
+import { validateVisualReview } from './visual-review.js';
 import { clarificationQuestions, clarificationAnswers } from './clarifications.js';
 import { reviewOrder, orderDebugTasks, sortReviewAgents } from './review-order.js';
 
@@ -202,9 +203,9 @@ export class Workflow {
       this.starting.delete(projectId);
     }
   }
-  launch(run) {
+  launch(run, verificationOnly = false) {
     const { state } = run;
-    run.promise = this.execute(run).catch(async (error) => {
+    run.promise = (verificationOnly ? this.verifyAndRepair(run) : this.execute(run)).catch(async (error) => {
         const cancelled = run.controller.signal.aborted && !run.failure;
         state.status = cancelled ? "cancelled" : "needs_attention";
         for (const task of state.tasks)
@@ -501,6 +502,11 @@ export class Workflow {
       const buffer = await this.workspace.read(state.projectId, state.design.path, { grantId: state.grantId, maxBytes: 16 * 1024 * 1024 });
       if (digest(buffer) !== state.design.hash) throw new Error("승인한 UI 시안 파일이 변경되었습니다.");
       designImage = buffer.toString("base64");
+      if(state.visual?.status==='repairing'&&state.visual.evidence?.comparison){
+        const comparison=state.visual.evidence.comparison,bytes=await this.workspace.read(state.projectId,comparison.path,{grantId:state.grantId,internal:true,maxBytes:16*1024*1024});
+        if(digest(bytes)!==comparison.hash)throw new Error('시안 비교 캡처가 바뀌었습니다.');
+        designImage=bytes.toString('base64');
+      }
     }
     const report = await this.callAgent(run, task.owner, "build", {
       designImage,
@@ -510,7 +516,7 @@ export class Workflow {
               ...task,
               instructions: `${task.instructions}\nHost test plan: ${JSON.stringify({ ...state.testing.plan, cases: state.testing.plan.cases.filter((row) => task.requirementIds.includes(row.requirementId)), assignedFiles: task.testFiles ?? state.testing.plan.files })}\nWrite meaningful assertions for every case. Use node:test, name each test starting with its case ID (e.g. T1). Only edit assignedFiles, not every file in the full test plan. Never modify application code or weaken requirements. Do not claim execution. No package installation.`,
             }
-          : task,
+          : state.visual?.status==='repairing'&&task.kind==='ui' ? {...task,instructions:task.instructions+'\nVisual repair: attached LEFT panel is the approved reference, RIGHT is the previous implementation. Correct only the supplied UI differences. Preserve all behavior, tests and the reference.'} : task,
       issues,
       validation: state.validation ? { ...state.validation, stale: true } : null,
       previousTaskReports: state.tasks.filter(row=>row.status==='reported').map(row=>({id:row.id,owner:row.owner,kind:row.kind,summary:row.report?.summary})),
@@ -531,6 +537,12 @@ export class Workflow {
     const seen = new Set();
     for (const file of report.files) {
       file.path = relativeFile(file.path).join("/");
+      if(file.path===state.design?.path)throw new Error('승인한 시안은 구현 담당자가 변경할 수 없습니다.');
+      if(state.visual?.status==='repairing'){
+        const allowed=task.writePaths??task.report?.changed?.map(row=>row.path)??[];
+        if(task.kind!=='ui'||!allowed.includes(file.path)||/\.(?:test|spec)\.[^.]+$|(?:^|\/)(?:tests?|__tests__|Function|package\.json|package-lock\.json)(?:\/|$)/i.test(file.path)||
+          (state.ownership?.[file.path]&&state.ownership[file.path].owner!==task.owner))throw new Error('시안 보정은 원래 UI 구현 파일만 수정할 수 있습니다.');
+      }
       if (task.writePaths && !task.writePaths.includes(file.path))
         throw new Error(`계획에 선언되지 않은 변경입니다: ${file.path}`);
       if (state.testFailure?.status === "repairing" &&
@@ -809,6 +821,57 @@ export class Workflow {
       run,
       state.tasks.map((task) => task.id),
     );
+    return this.verifyAndRepair(run);
+  }
+  async reviewVisual(run,frozen){
+    const {state}=run,previous=state.visual;
+    if(state.options.visualReview===false)return state.visual={status:'disabled',summary:'사용자가 시안 일치 검토를 끈 작업입니다.'};
+    if(state.design?.status!=='approved'||!state.design.hash)return state.visual={status:'not_applicable',summary:'승인한 이미지 시안이 없어 이미지 일치 검토 대상이 아닙니다.'};
+    const tasks=state.tasks.filter(task=>task.kind==='ui');
+    if(!tasks.length)return state.visual={status:'not_applicable',summary:'UI 구현 작업이 없습니다.'};
+    state.visual={status:'capturing',summary:'구현 화면을 같은 크기로 캡처합니다.',round:state.round};
+    await this.record(run,tasks[0].owner,state.visual.summary,{activity:'visual-review'});
+    try{
+      if(!this.visualCapture)throw new Error('시안 비교 캡처 도구가 준비되지 않았습니다.');
+      const evidence=await this.visualCapture.capture({projectId:state.projectId,grantId:state.grantId,runId:state.id,round:state.round,referencePath:state.design.path,referenceHash:state.design.hash,sourceHash:frozen.hash,options:state.options,signal:run.controller.signal});
+      if(evidence.sourceHash!==frozen.hash||evidence.referenceHash!==state.design.hash)throw new Error('현재 소스와 같은 시안 비교 캡처가 아닙니다.');
+      state.visual={...state.visual,evidence,status:'reviewing',summary:'UI 담당 AI가 시안과 구현 화면을 항목별로 비교합니다.'};
+      await this.record(run,tasks[0].owner,state.visual.summary,{activity:'visual-review'});
+      if(!run.forceVisual&&previous?.status==='matched'&&previous.evidence?.actual.hash===evidence.actual.hash&&previous.evidence.referenceHash===evidence.referenceHash){
+        state.visual={...previous,evidence,reused:true,summary:'동일한 시안·구현 이미지의 이전 AI 판정을 재사용했습니다.'};
+      }else{
+        const bytes=await this.workspace.read(state.projectId,evidence.comparison.path,{grantId:state.grantId,internal:true,maxBytes:16*1024*1024});
+        if(digest(bytes)!==evidence.comparison.hash)throw new Error('비교 이미지가 바뀌었습니다.');
+        const result=await this.callAgent(run,tasks[0].owner,'review',{snapshot:frozen,tasks,task:tasks[0],options:state.options,signal:run.controller.signal,spec:state.spec,
+          designImage:bytes.toString('base64'),visualComparison:{viewport:evidence.viewport,panels:'LEFT approved reference; RIGHT actual render',designSpecification:state.design.specification,metrics:evidence.metrics}});
+        const verdict=validateVisualReview(result,tasks,state.design.path);
+        state.visual={...state.visual,...verdict,status:verdict.verdict==='match'?'matched':verdict.verdict==='mismatch'?'mismatch':'blocked',provider:result.executedProvider,model:result.executedModel,actor:tasks[0].owner,reused:false};
+      }
+      run.forceVisual=false;
+      if((await this.snapshot(run)).hash!==frozen.hash||!await this.visualCapture.stable(state.projectId,state.grantId,evidence))throw new Error('시안 검토 중 소스·리소스가 바뀌었습니다.');
+      await this.record(run,tasks[0].owner,state.visual.summary,{activity:'visual-review',visualStatus:state.visual.status});
+    }catch(error){
+      run.controller.signal.throwIfAborted();
+      state.visual={...state.visual,status:'blocked',summary:redact(error.message),requiresPreviewConsent:error.requiresPreviewConsent===true};
+      await this.record(run,'system','시안 일치 확인 필요 · '+state.visual.summary,{activity:'visual-review'});
+    }
+    return state.visual;
+  }
+  async retryVisual(projectId,runId,options){
+    if(this.isActive(projectId)||this.starting.has(projectId))throw new Error('현재 작업이 끝난 뒤 다시 비교하세요.');
+    this.starting.add(projectId);
+    try{
+    const state=await this.current(projectId,runId);
+    if(!state?.visual||state.design?.status!=='approved')throw new Error('비교할 승인 시안이 없습니다.');
+    if((await this.workspace.snapshot(projectId)).hash!==state.snapshotHash)throw new Error('소스가 변경됐습니다. 컨트롤 타워에서 새 작업으로 재검토하세요.');
+    state.options.allowExecution=options.allowExecution===true;state.options.visualReview=true;
+    if(options.executionBackend)state.options.executionBackend=options.executionBackend;
+    if(options.dockerImage)state.options.dockerImage=options.dockerImage;
+    const run={state,controller:new AbortController(),queue:Promise.resolve(),forceVisual:true};this.runs.set(projectId,run);this.launch(run,true);return structuredClone(state);
+    }finally{this.starting.delete(projectId);}
+  }
+  async verifyAndRepair(run){
+    const {state}=run;
     while (true) {
       state.status = "validating";
       state.reviewChain = [];
@@ -883,6 +946,18 @@ export class Workflow {
         await this.record(run, "system", state.testFailure.reason);
         return;
       }
+      if(state.validation.passed&&!state.validation.stale){
+        const visual=await this.reviewVisual(run,frozen);
+        if(visual.status==='blocked'){
+          state.status='awaiting_validation';await this.record(run,'system','기능 결과와 별도로 시안 일치 확인이 필요합니다.');return;
+        }
+        if(visual.status==='mismatch'){
+          if(state.round>=state.options.maxRepairRounds){state.status='needs_attention';await this.record(run,'system','시안 보정 횟수 한도에 도달했습니다. 차이 항목을 직접 확인하세요.');return;}
+          state.round++;state.status='repairing';state.visual.status='repairing';
+          for(const issue of visual.issues)await this.record(run,issue.owner,'시안 보정 요청: '+issue.description,{activity:'visual-repair',taskId:issue.taskId});
+          await this.buildTasks(run,[...new Set(visual.issues.map(issue=>issue.taskId))],visual.issues);continue;
+        }
+      }else state.visual={status:'waiting',summary:'기능 실행 검증을 통과한 뒤 시안을 비교합니다.'};
       const reviews = await this.sequentialReview(run, frozen);
       run.controller.signal.throwIfAborted();
       const after = await this.snapshot(run);
@@ -937,6 +1012,7 @@ export class Workflow {
           (!state.options.mutation || state.mutation?.passed)
             ? "completed"
             : "awaiting_validation";
+        if(finalStatus==='completed'&&state.visual?.status==='matched'&&!await this.visualCapture.stable(state.projectId,state.grantId,state.visual.evidence))throw new Error('최종 시안 검토 이후 리소스가 바뀌었습니다.');
         if (finalStatus === "completed") await markVerified(this.workspace, state.projectId, state.grantId, frozen);
         state.status = finalStatus;
         await this.record(
@@ -1071,23 +1147,28 @@ export class Workflow {
             }),
         });
         const after = await this.workspace.snapshot(projectId);
-        if (before.hash !== after.hash)
+        if (before.hash !== after.hash) {
+          if(state.visual)state.visual={...state.visual,status:'stale',summary:'검증 중 소스가 변경돼 이전 시안 판정이 무효화됐습니다.'};
           state.validation = {
             ...state.validation,
             passed: false,
             stale: true,
             summary: "검증 중 소스가 변경되었습니다.",
           };
+        }
         state.testFailure = testFailure(state.validation, state.ownership);
         if (state.testFailure?.status === "diagnosed") {
           state.testFailure.status = "intervention";
           state.testFailure.reason = "재실행에서도 테스트가 실패했습니다. 로그를 확인한 뒤 새 작업으로 수정을 요청하세요.";
         }
         await this.testingResult(run);
-        if (state.validation.passed && !state.validation.stale) await this.sequentialReview(run, after);
+        let visualOK=true;
+        if(state.validation.passed&&!state.validation.stale){const visual=await this.reviewVisual(run,after);visualOK=['matched','not_applicable','disabled'].includes(visual.status);if(visualOK)await this.sequentialReview(run,after);}
         const reviewed = state.reviewChain?.length && state.reviewChain.every(step=>step.status==='passed') &&
           state.reviews?.length === state.reviewChain.length && state.reviews.every(review=>!review.issues.length);
-        const finalStatus = state.validation.passed && reviewed ? "completed" : "awaiting_validation";
+        const finalStatus = state.validation.passed && !state.validation.stale && reviewed && visualOK ? "completed" : "awaiting_validation";
+        if(finalStatus==='completed'&&(await this.workspace.snapshot(projectId)).hash!==after.hash)throw new Error('최종 검토 중 소스가 바뀌었습니다. 새 작업으로 다시 확인하세요.');
+        if(finalStatus==='completed'&&state.visual?.status==='matched'&&!await this.visualCapture.stable(projectId,state.grantId,state.visual.evidence))throw new Error('시안 검토 이후 리소스가 바뀌었습니다.');
         if (finalStatus === "completed") await markVerified(this.workspace, projectId, state.grantId, after);
         state.status = finalStatus;
         await this.record(run, "system", state.validation.summary);
@@ -1111,6 +1192,7 @@ export class Workflow {
     if (!state) return;
     state.status = "awaiting_validation";
     state.snapshotHash = null;
+    if(state.visual)state.visual={...state.visual,status:'stale',summary:'파일 복원으로 이전 시안 판정이 무효화됐습니다.'};
     state.validation = { configured: false, passed: false, stale: true, summary: "파일을 복원했습니다. 새 작업에서 다시 검증하세요." };
     if (state.testing) state.testing.stale = true;
     const run = { state, queue: Promise.resolve() };

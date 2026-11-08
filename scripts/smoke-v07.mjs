@@ -341,6 +341,11 @@ try {
         require = process.getBuiltinModule("module").createRequire(p);
       const { GPTProvider } = require(p);
       const { ImageService } = require(p.replace("providers.js", "images.js"));
+      // This legacy image flow uses a 1px protocol fixture, not a renderable UI.
+      // The real visual acceptance/repair gate is covered by check-visual-review.
+      const Preferences = require(p.replace('providers.js','preferences.js')).Preferences;
+      const previousPreferences = Preferences.prototype.get;
+      Preferences.prototype.get = async function(){return {...await previousPreferences.call(this),visualReview:false};};
       const { Store } = require(p.replace("providers.js", "store.js"));
       const { GeminiConnection } = require(p.replace("providers.js", "gemini.js"));
       let geminiConnected = false;

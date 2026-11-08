@@ -7,6 +7,7 @@ import {
   session,
   dialog,
   Notification,
+  nativeImage,
 } from "electron";
 import { join, dirname, resolve, isAbsolute } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -19,9 +20,10 @@ import { ImageService } from "./core/images.js";
 import { ClaudeConnection } from "./core/claude.js";
 import { Projects } from "./core/projects.js";
 import { publicError } from "./core/http.js";
-import { Workspace } from "./core/workspace.js";
+import { Workspace, digest } from "./core/workspace.js";
 import { listCheckpoints, restoreCheckpoint, verifiedCheckpoint } from "./core/checkpoints.js";
 import { Workflow } from "./core/workflow.js";
+import { VisualCapture } from './core/visual-capture.js';
 import { GPTProvider, ClaudeProvider } from "./core/providers.js";
 import { CursorProvider } from "./core/cursor-provider.js";
 import { CursorConnection } from "./core/cursor.js";
@@ -96,6 +98,7 @@ let window,
   usage;
 let preferences, conversations, agentChat, auxiliary;
 let prerequisites;
+let visualCapture;
 let prerequisiteScan, prerequisiteSource = 'codex';
 let quota;
 let inputNotifications;
@@ -455,6 +458,7 @@ async function executionOptions(id) {
     executionBackend: settings.executionBackend,
     dockerImage: settings.dockerImage,
     designMode: settings.designMode,
+    visualReview: settings.visualReview,
     maxConcurrentAgents: settings.maxConcurrentAgents,
     apiBudgetUsd: settings.apiBudgetUsd,
     apiInputRate: settings.apiInputRate,
@@ -721,6 +725,11 @@ else {
           }),
       );
       workflow.designGenerator = generateDesignImage;
+      visualCapture=new VisualCapture(workspace,store,{BrowserWindow,session,nativeImage});
+      workflow.visualCapture={
+        capture:async context=>{const live=await preferences.get();return visualCapture.capture({...context,options:{...context.options,allowExecution:context.options.allowExecution&&live.allowExecution&&live.executionBackend==='host'}});},
+        stable:(...args)=>visualCapture.stable(...args),
+      };
       workflow.quota = quota;
       agentChat = new AgentChat({
         conversations,
@@ -766,6 +775,28 @@ else {
         return prerequisiteScan;
       });
       handle('tower:call-quota', () => quota.snapshot());
+      handle('tower:visual-permission',async(id,runId,allow)=>{
+        const state=await workflow.current(id,runId);if(!state?.visual)throw new Error('시안 비교 작업을 확인하세요.');
+        if(allow!==undefined&&typeof allow!=='boolean')throw new Error('미리보기 동의 값을 확인하세요.');
+        if(allow===true){
+          const result=await dialog.showMessageBox(window,{type:'question',title:'UI 브라우저 미리보기 실행',message:'이 폴더의 UI를 격리된 브라우저에서 실행해 캡처할까요?',
+            detail:'외부 통신·파일 접근·다운로드를 차단한 앱 내 브라우저에서 정적 HTML과 웹 스크립트를 실행합니다. 캡처와 화면 정보는 UI 담당 AI에게 전달됩니다. Docker 빌드·테스트 설정은 바뀌지 않습니다. 이 동의는 현재 PC 사용자와 현재 폴더에만 저장됩니다.',buttons:['취소','이 폴더의 미리보기 허용'],defaultId:0,cancelId:0,noLink:true});
+          if(result.response!==1)return{allowed:false};
+          await visualCapture.authorize(id,state.grantId,true);
+        }else if(allow===false)await visualCapture.authorize(id,state.grantId,false);
+        const permission=await visualCapture.permission(id,state.grantId,await executionOptions(id));return{allowed:permission.allowed,explicit:permission.explicit};
+      });
+      handle('tower:visual-retry',async(id,runId)=>workflow.retryVisual(id,runId,await executionOptions(id)));
+      handle('tower:visual-evidence',async(id,runId)=>{
+        const state=await workflow.current(id,runId),visual=state?.visual;
+        if(!visual?.evidence)return{visual,images:null};
+        const evidence=visual.evidence,prefix=`.control-tower/runs/${state.id}/visual/`;
+        if(!evidence.actual.path.startsWith(prefix)||!/^\d+-[a-f0-9-]{36}-actual\.png$/.test(evidence.actual.path.slice(prefix.length)))throw new Error('시안 캡처 경로를 확인하세요.');
+        const reference=await workspace.read(id,state.design.path,{grantId:state.grantId,maxBytes:16*1024*1024}),actual=await workspace.read(id,evidence.actual.path,{grantId:state.grantId,internal:true,maxBytes:16*1024*1024});
+        if(digest(reference)!==state.design.hash||digest(actual)!==evidence.actual.hash)throw new Error('시안 또는 캡처가 바뀌었습니다.');
+        const stale=(await workspace.snapshot(id)).hash!==evidence.sourceHash||!await visualCapture.stable(id,state.grantId,evidence);
+        return{visual,stale,functional:state.validation,images:{reference:'data:image/png;base64,'+reference.toString('base64'),actual:'data:image/png;base64,'+actual.toString('base64')}};
+      });
       handle('tower:revise-layout', (id, feedback, conversationId) => workflow.reviseDesign(id, feedback, 'gpt', conversationId, 'layout'));
       handle('tower:open-install-site', async id => {
         if (!Object.hasOwn(INSTALL_SITES, id)) throw new Error('허용되지 않은 설치 안내입니다.');

@@ -18,6 +18,7 @@ export const DEFAULT_PREFERENCES = Object.freeze({
   unattended: true,
   designApproval: true,
   designMode: 'layout',
+  visualReview: true,
   mutationByDefault: false,
   funByDefault: true,
   executionBackend: 'docker',
@@ -53,6 +54,7 @@ export class Preferences {
       (input.apiBudgetUsd > 0 && (!input.apiRateModel || !(input.apiInputRate > 0 || input.apiOutputRate > 0))) ||
       (input.designApproval !== undefined && typeof input.designApproval !== "boolean") ||
       (input.designMode !== undefined && !['layout', 'image'].includes(input.designMode)) ||
+      (input.visualReview !== undefined && typeof input.visualReview !== 'boolean') ||
       (input.executionBackend !== undefined && !['docker', 'host'].includes(input.executionBackend)) ||
       (input.dockerImage !== undefined && (typeof input.dockerImage !== 'string' || input.dockerImage.length > 200 || !/^[a-z0-9][a-z0-9./_:-]*(?:@sha256:[a-f0-9]{64})?$/.test(input.dockerImage))) ||
       (input.mutationByDefault !== undefined && typeof input.mutationByDefault !== 'boolean') ||

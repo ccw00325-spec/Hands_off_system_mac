@@ -397,6 +397,7 @@ export class GeminiConnection {
         modelId: model,
       });
       const { signal, designImage, ...source } = context;
+      if(designImage&&!init.agentCapabilities?.promptCapabilities?.image)throw new Error('선택한 Gemini 연결은 이미지 입력을 지원하지 않아 시안을 검토할 수 없습니다.');
       const data = { ...source, snapshot: { ...source.snapshot, root: "." } };
       const result = await rpc.request(
         "session/prompt",
@@ -466,6 +467,6 @@ export class GeminiProvider {
     return this.ask(CHAT_FORMAT, context);
   }
   review(context) {
-    return this.ask(reviewInstructions(), context);
+    return this.ask(reviewInstructions(context.visualComparison), context);
   }
 }

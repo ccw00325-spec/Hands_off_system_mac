@@ -78,7 +78,7 @@ export class CursorProvider {
     return this.ask(await planningInstructions(undefined, context.options), context);
   }
   review(context) {
-    return this.ask(reviewInstructions(), context);
+    return this.ask(reviewInstructions(context.visualComparison), context);
   }
   cancel() {
     this.connection.cancel();

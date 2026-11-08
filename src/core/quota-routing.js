@@ -44,7 +44,7 @@ export function replacementCandidates(
       action === "plan"
         ? "control"
         : action === "review"
-          ? "review"
+          ? (task?.kind === 'ui' ? 'ui' : 'review')
           : (task?.kind ?? "debug");
   const routes = [];
   if (slot.fallback) routes.push({ ...slot.fallback, preferred: true });

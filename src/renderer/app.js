@@ -11,6 +11,7 @@ import { createAgentDesk } from "./agent-desk.js";
 import { createNotifications } from "./notification-view.js";
 import { requestIssues, createRequestAlerts } from './request-readiness.js';
 import { createPrerequisiteWatch } from './prerequisite-watch.js';
+import { createVisualView } from './visual-view.js';
 import { displayedTeam } from "./desk-state.js";
 import {createGuide} from './guide.js';
 import { createClarifications } from './clarification-view.js';
@@ -63,6 +64,7 @@ const ACTIVE_RUN = new Set([
   "final_review",
 ]);
 const resultCache = new Map();
+const visualView=createVisualView({api,call,projectId:()=>projectData?.activeId,currentRun:()=>currentRun,active:run=>ACTIVE_RUN.has(run?.status),notice:toast});
 let usageData = null,
   usageProvider = "claude",
   restoring = false,
@@ -2021,6 +2023,7 @@ function renderConversationPanels(run) {
     }
   }
   testingInspector(run);
+  visualView.render(run);
 }
 $("#new-conversation").addEventListener("click", () => createConversation());
 for (const form of document.querySelectorAll(".agent-chat-form")) {
