@@ -72,12 +72,16 @@ try{
  const twoGPT=[{id:'gpt',provider:'gpt',roles:['control','debug','review','test']},{id:'grok',provider:'gpt',roles:['feature','ui','debug','review','test']}];
  const assigned=await page.evaluate(({id,team})=>window.tower.setTeam(id,team),{id:projectId,team:twoGPT});assert.equal(assigned.ok,true,assigned.error);
  const second=(await page.evaluate(()=>window.tower.createProject('Required tool scope fixture'))).value.activeId;
+ const inherited=(await page.evaluate(()=>window.tower.projects())).value.items.find(row=>row.id===second).team;
+ assert.deepEqual(inherited,twoGPT);
+ const needsClaude=twoGPT.map((row,index)=>({...row,provider:index===0?'claude':row.provider}));
+ const scopedTeam=await page.evaluate(({id,team})=>window.tower.setTeam(id,team),{id:second,team:needsClaude});assert.equal(scopedTeam.ok,true,scopedTeam.error);
  await application.evaluate(()=>globalThis.__honorTeam=true);
  const scope=await page.evaluate(async({first,second})=>({first:await window.tower.checkWorkTools(first),second:await window.tower.checkWorkTools(second)}),{first:projectId,second});
  assert.equal(scope.first.ok,true);assert.equal(scope.second.code,'PREREQUISITES_REQUIRED');assert.equal(scope.second.prerequisites.projectId,second);
  assert.ok(scope.second.prerequisites.rows.some(row=>row.id==='claude'&&row.required&&row.state==='missing'));
  await application.evaluate(()=>globalThis.__honorTeam=false);await page.evaluate(id=>window.tower.selectProject(id),projectId);
- checks.push('The gate uses the requested project team: a two-GPT project passes while a different active project requiring missing Claude is blocked');
+ checks.push('New projects inherit the saved two-GPT team; assigning Claude to a separate project blocks that project on missing Claude while the original GPT project still passes');
  await page.locator('#continue-prerequisites').click();await page.locator('#open-settings').click();
  await page.locator('#settings-dialog[open]').waitFor();
  assert.equal(await page.locator('#execution-backend').inputValue(),'docker');assert.equal(await page.locator('#design-mode').inputValue(),'layout');assert.equal(await page.locator('#mutation-by-default').isChecked(),false);
