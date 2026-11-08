@@ -55,6 +55,7 @@ export function createNotifications(api, onAction) {
           checkpoints: "체크포인트",
           delivery: "전송 상태",
           questions: '질문에 답변하기',
+          prerequisites: '필수 프로그램 설치',
         }[item.action],
       );
       action.type = "button";
@@ -102,6 +103,7 @@ export function createNotifications(api, onAction) {
             checkpoints: "복원 기록",
             delivery: "전송 상태",
             questions: '질문에 답변하기',
+            prerequisites: '필수 프로그램 설치',
           }[item.action],
         );
         action.type = "button";

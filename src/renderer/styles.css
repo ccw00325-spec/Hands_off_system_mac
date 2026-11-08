@@ -2819,6 +2819,8 @@ body[data-sidebar="off"] .workbench-shell {
 .fun-choice input { width:18px; height:18px; flex-shrink:0; }
 #fun-question-fields textarea { box-sizing:border-box; width:100%; resize:vertical; margin-top:8px; }
 #visual-dialog { width:min(1420px,calc(100vw - 32px)); max-height:90vh; }
+#prerequisites-required { margin:16px 24px; padding:12px 16px; border-left:3px solid #e9ad66; background:#251f18; line-height:1.7; }
+#prerequisites-required[data-ready="true"] { border-color:var(--mint); background:var(--mint-bg); }
 #visual-dialog > :not(header) { margin-left:24px; margin-right:24px; }
 #visual-dialog > header { position:sticky; top:0; z-index:2; background:var(--panel,#101416); }
 #visual-dialog > .action-row { margin-bottom:24px; }

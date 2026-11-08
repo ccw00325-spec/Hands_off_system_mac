@@ -11,13 +11,14 @@ try{
  application=await electron.launch({args:['.'],cwd:resolve('.'),env});
  await application.evaluate(({dialog},data)=>{
   const path=process.getBuiltinModule('url').fileURLToPath(data.url),require=process.getBuiltinModule('module').createRequire(path);
-  globalThis.__toolsReady=false;globalThis.__sites=[];globalThis.__hostApproved=false;
+  globalThis.__toolsReady=false;globalThis.__sites=[];globalThis.__hostApproved=false;globalThis.__workCalls=0;
+  require(path.replace('prerequisites.js','agent-chat.js')).AgentChat.prototype.send=async()=>{globalThis.__workCalls++;return{message:{content:'fixture reply'}};};
   const Prerequisites=require(path).Prerequisites, scan=Prerequisites.prototype.scan;
-  Prerequisites.prototype.scan=async function(){
+  Prerequisites.prototype.scan=async function(_status,options={}){
    const ready=globalThis.__toolsReady;
-   const fixture=new Prerequisites({node:async()=>data.nodePath,find:async name=>ready?'/fixture/'+name:null,
+   const fixture=new Prerequisites({node:async()=>data.nodePath,find:async name=>ready&&name!=='git'?'/fixture/'+name:null,
     probe:async(executable,args)=>({code:0,output:args[0]==='--version'?(executable.endsWith('git')?'git version 2.48.0':ready?'v24.0.0':'v22.0.0'):'28.0.0'})});
-   return this.current=await scan.call(fixture,{gpt:{installed:ready}},{providers:['gpt'],executionBackend:'docker'});
+   return this.current=await scan.call(fixture,{gpt:{installed:ready}},{providers:globalThis.__honorTeam?options.providers:['gpt'],executionBackend:'docker'});
   };
   const Browser=require(path.replace('prerequisites.js','browser.js')).BrowserOpener,open=Browser.prototype.open;
   Browser.prototype.open=async function(url){this.openDefault=async safe=>{globalThis.__sites.push(safe);return true;};return open.call(this,url);};
@@ -41,6 +42,20 @@ try{
  assert.match(await page.locator('[data-tool=git] .prerequisite-purpose').innerText(),/GitHub.*백업/);
  await page.screenshot({path:join(artifacts,'prerequisites-ui.png')});
  checks.push('Fresh startup finishes the splash and opens a missing/outdated tools dialog before the first-run tour; unused Gemini remains optional');
+ const projectId=(await page.evaluate(()=>window.tower.projects())).value.activeId;
+ for(const endpoint of ['sendMessage','startWorkflow','rerunTests','retryVisual','generateImage','reviseLayout','answerQuestions']){
+  const result=await page.evaluate(({endpoint,id})=>window.tower[endpoint](id,...(endpoint==='startWorkflow'?[{request:'Build fixture app'}]:['fixture','gpt','Build fixture app','work'])),{endpoint,id:projectId});
+  assert.equal(result.ok,false);assert.equal(result.code,'PREREQUISITES_REQUIRED',endpoint);assert.ok(result.prerequisites.rows.some(row=>row.required&&row.state!=='ready'));
+ }
+ assert.equal(await application.evaluate(()=>globalThis.__workCalls),0);
+ checks.push('All public AI work/resume/test/design endpoints reject missing required tools before dispatch, file generation or billable calls');
+ await page.locator('#continue-prerequisites').click();await page.locator('#first-run-tour[open]').waitFor();await page.locator('#tour-skip').click();
+ if(await page.locator('#settings-dialog').evaluate(el=>el.open))await page.locator('#close-settings').click();
+ await page.locator('#planner-input').fill('작업 요청은 설치 후에만 보내 주세요');await page.locator('#start-workflow').click();await page.locator('#prerequisites-dialog[open]').waitFor();
+ assert.match(await page.locator('#toast').innerText(),/설치를 진행해주세요/);assert.match(await page.locator('#prerequisites-required').innerText(),/닫아도.*차단/);assert.equal(await page.locator('#planner-input').inputValue(),'작업 요청은 설치 후에만 보내 주세요');
+ assert.equal(await application.evaluate(()=>globalThis.__workCalls),0);await page.screenshot({path:join(artifacts,'prerequisites-blocked.png')});
+ const notices=(await page.evaluate(()=>window.tower.notifications())).value;assert.ok(notices.some(row=>row.action==='prerequisites'));
+ checks.push('Closing setup does not bypass the gate: request reopens the install popup and right-side actionable notification, retaining the unsent prompt');
  await page.locator('[data-tool=node] button').click();
  assert.match(await page.locator('[data-tool=node] .prerequisite-state').innerText(),/대기|확인 중/);
  assert.deepEqual(await application.evaluate(()=>globalThis.__sites),['https://nodejs.org/en/download']);
@@ -50,7 +65,20 @@ try{
  await page.locator('#continue-prerequisites').filter({hasText:'준비 완료'}).waitFor();
  await page.locator('#recheck-prerequisites').click();
  assert.match(await page.locator('[data-tool=node]').innerText(),/24.0.0/);
- await page.locator('#continue-prerequisites').click();await page.locator('#first-run-tour[open]').waitFor();await page.locator('#tour-skip').click();
+ assert.match(await page.locator('#prerequisites-required').innerText(),/준비 완료/);
+ const allowed=await page.evaluate(id=>window.tower.sendMessage(id,'fixture','gpt','Build after install','work'),projectId);assert.equal(allowed.ok,true);assert.equal(await application.evaluate(()=>globalThis.__workCalls),1);
+ assert.match(await page.locator('[data-tool=gemini]').innerText(),/설치 필요/);assert.match(await page.locator('[data-tool=git]').innerText(),/설치 필요/);
+ checks.push('Fresh readiness immediately unlocks the guarded dispatch while optional Gemini and Git remain uninstalled; no AI inference is called');
+ const twoGPT=[{id:'gpt',provider:'gpt',roles:['control','debug','review','test']},{id:'grok',provider:'gpt',roles:['feature','ui','debug','review','test']}];
+ const assigned=await page.evaluate(({id,team})=>window.tower.setTeam(id,team),{id:projectId,team:twoGPT});assert.equal(assigned.ok,true,assigned.error);
+ const second=(await page.evaluate(()=>window.tower.createProject('Required tool scope fixture'))).value.activeId;
+ await application.evaluate(()=>globalThis.__honorTeam=true);
+ const scope=await page.evaluate(async({first,second})=>({first:await window.tower.checkWorkTools(first),second:await window.tower.checkWorkTools(second)}),{first:projectId,second});
+ assert.equal(scope.first.ok,true);assert.equal(scope.second.code,'PREREQUISITES_REQUIRED');assert.equal(scope.second.prerequisites.projectId,second);
+ assert.ok(scope.second.prerequisites.rows.some(row=>row.id==='claude'&&row.required&&row.state==='missing'));
+ await application.evaluate(()=>globalThis.__honorTeam=false);await page.evaluate(id=>window.tower.selectProject(id),projectId);
+ checks.push('The gate uses the requested project team: a two-GPT project passes while a different active project requiring missing Claude is blocked');
+ await page.locator('#continue-prerequisites').click();await page.locator('#open-settings').click();
  await page.locator('#settings-dialog[open]').waitFor();
  assert.equal(await page.locator('#execution-backend').inputValue(),'docker');assert.equal(await page.locator('#design-mode').inputValue(),'layout');assert.equal(await page.locator('#mutation-by-default').isChecked(),false);
  checks.push('Passive polling marks newly runnable tools ready without a manual refresh; manual recheck still works and onboarding keeps Docker, text preview and opt-in mutation defaults');

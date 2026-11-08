@@ -97,6 +97,7 @@ contextBridge.exposeInMainWorld(
     readFile: call("read-file"),
     openFolder: call("open-folder"),
     startWorkflow: call("start-workflow"),
+    checkWorkTools: call('check-work-tools'),
     workflow: call("workflow"),
     stopWorkflow: call("stop-workflow"),
     onEvent(callback) {

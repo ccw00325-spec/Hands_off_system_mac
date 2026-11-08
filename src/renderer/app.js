@@ -118,14 +118,23 @@ async function handleNotification(item) {
       renderProjects(await call(api.selectProject(item.projectId)));
     if (item.conversationId && item.conversationId !== currentConversation?.id)
       await loadConversation(item.conversationId);
-    if (item.action === 'questions') clarificationUI.open();
+    if (item.action === 'prerequisites') showPrerequisites(await call(api.prerequisites()));
+    else if (item.action === 'questions') clarificationUI.open();
     else missionAction(item.action ?? "workflow");
   } catch (error) { toast(error.message,"error"); }
 }
 function currentDisplayTeam() { return displayedTeam(currentRun, teamConfig ?? [], currentConversation); }
 async function call(promise) {
   const result = await promise;
-  if (!result.ok) throw new Error(result.error);
+  if (!result.ok) {
+    if (result.code === 'PREREQUISITES_REQUIRED' && result.prerequisites) {
+      const projectId = result.prerequisites.projectId ?? projectData?.activeId;
+      if (projectId === projectData?.activeId) showPrerequisites(result.prerequisites);
+      notifications.push(result.error, 'error', {action:'prerequisites',projectId});
+      throw Object.assign(new Error(result.error), {notified:true});
+    }
+    throw new Error(result.error);
+  }
   return result.value;
 }
 function message(selector, text, type = "") {
@@ -144,7 +153,7 @@ async function busy(button, text, task) {
   try {
     return await task();
   } catch (error) {
-    toast(error.message, "error");
+    if (!error.notified) toast(error.message, "error");
   } finally {
     button.disabled = false;
     button.textContent = previous;
@@ -865,7 +874,10 @@ async function initialize() {
       const status=await refreshStatus(boot.status);
       applyModelCatalog(boot.catalog);
       const setupNeeded = boot.prerequisites?.needsAttention && !sessionStorage.getItem('tower-setup-seen');
-      if (setupNeeded) showPrerequisites(boot.prerequisites);
+      if (setupNeeded) {
+        showPrerequisites(boot.prerequisites);
+        notifications.push('설치를 진행해주세요. 필수 프로그램이 모두 준비되어야 AI 작업과 앱 제작을 시작할 수 있습니다.', 'error', {action:'prerequisites',projectId:projectData?.activeId});
+      }
       else if (!localStorage.getItem("tower-tour-v1")) startTour();
       else if (!preferences.onboardingComplete) $("#settings-dialog").showModal();
       $("#footer-status").textContent =
@@ -1188,9 +1200,12 @@ const showRequestAlerts = createRequestAlerts(issue => {
 });
 $("#start-workflow").addEventListener("click", () => {
   const issues = controllerIssues();
-  if (issues.length) { showRequestAlerts(issues); return; }
   return busy($("#start-workflow"), "전송 중…", async () => {
     const projectId = projectData.activeId;
+    if (issues.length) {
+      await call(api.checkWorkTools(projectId));
+      showRequestAlerts(issues);return;
+    }
     if (!currentConversation) await loadConversation();
     const conversationId = currentConversation.id;
     const message = $("#planner-input").value.trim();
@@ -2491,6 +2506,9 @@ function showPrerequisites(report) {
 }
 function renderPrerequisites(report, { intents, checking }) {
   const list = $('#prerequisites-list');
+  const missing = report.rows.filter(row => row.required && row.state !== 'ready');
+  const summary = $('#prerequisites-required');summary.dataset.ready = String(!missing.length);
+  summary.textContent = missing.length ? `설치를 진행해주세요. ${missing.map(row => row.label).join(' · ')} 준비가 끝나야 작업을 시작할 수 있습니다. 설치 안내를 닫아도 AI 작업은 차단됩니다.` : '필수 프로그램 준비 완료. 이 창을 닫고 작업을 요청하세요.';
   $('#prerequisites-status').textContent = `${report.platform} · ${report.arch} · ${checking ? '실행 가능 여부 확인 중…' : '설치를 마치면 자동으로 확인해요. 창으로 돌아오면 즉시 다시 확인합니다.'}`;
   const labels = { ready: '준비됨', missing: '설치 필요', installing: '설치 중…', outdated: '24 이상으로 업데이트', unknown: '실행 확인 필요', 'npm-missing': 'npm 설치 확인 필요', 'not-running': 'Docker 설치됨 · 엔진 시작 필요', 'image-missing':'엔진 준비됨 · 격리 이미지 준비 필요' };
   for (const row of report.rows) {
@@ -2519,7 +2537,7 @@ function renderPrerequisites(report, { intents, checking }) {
     if (!view.button.disabled) view.button.textContent = row.state === 'ready' ? '공식 안내' : '설치 안내 열기';
   }
   for (const [id, view] of prerequisiteRows) if (!report.rows.some(row => row.id === id)) { view.item.remove(); prerequisiteRows.delete(id); }
-  $('#continue-prerequisites').textContent = report.needsAttention ? '나중에 준비하고 둘러보기' : '준비 완료 · 시작하기';
+  $('#continue-prerequisites').textContent = missing.length ? '설정·연결만 확인하기' : '준비 완료 · 시작하기';
 }
 function closePrerequisites() {
   prerequisiteWatcher.close();

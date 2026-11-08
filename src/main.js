@@ -41,7 +41,7 @@ import { AgentChat } from "./core/agent-chat.js";
 import { AuxiliaryServices } from "./core/services.js";
 import {ModelCatalog} from './core/model-catalog.js';
 import { loadLocalWindow } from './core/window-loader.js';
-import { Prerequisites, INSTALL_SITES, probeTool } from './core/prerequisites.js';
+import { Prerequisites, INSTALL_SITES, probeTool, requireTools } from './core/prerequisites.js';
 import { CallQuota } from './core/call-quota.js';
 import { InputNotifications, registerNotificationShortcut, NOTIFICATION_CLSID } from './core/input-notifications.js';
 import { cacheWindowsIcon, windowsTaskbarDetails, windowsAppId } from './core/windows-branding.js';
@@ -293,14 +293,19 @@ async function prepareStartup() {
     prerequisites: tools,
   };
 }
-async function scanPrerequisites(current, settings, projectData) {
+async function scanPrerequisites(current, settings, projectData, projectId = projectData.activeId) {
   prerequisiteSource = current.gpt?.source ?? prerequisiteSource;
-  const active = projectData.activeId;
+  const active = projectId;
   const team = active ? await roles.getTeam(active) : [];
   const providers = team.length ? [...new Set(team.map(row => row.provider))].filter(id => id !== 'gpt' || prerequisiteSource !== 'api') : undefined;
-  return prerequisites.scan({ ...current, gpt: current.codex }, { providers, executionBackend: settings.executionBackend, dockerImage:settings.dockerImage });
+  return { ...await prerequisites.scan({ ...current, gpt: current.codex }, { providers, executionBackend: settings.executionBackend, dockerImage:settings.dockerImage }), projectId: active };
 }
-async function passivePrerequisites(tools) {
+async function passivePrerequisites(tools, projectId) {
+  prerequisiteSource = (await store.read('execution-config', {})).gptSource ?? prerequisiteSource;
+  if (!tools) {
+    const team = await roles.getTeam(projectId);
+    tools = [...new Set(team.map(row => row.provider))].filter(id => id !== 'gpt' || prerequisiteSource !== 'api');
+  }
   const finders = { gpt: () => codex.find(), claude: () => claude.executable(), grok: () => grok.connection.find(), gemini: () => gemini.find() };
   const presence = Object.fromEntries(await Promise.all(Object.entries(finders).map(async ([id, find]) => {
     const before = prerequisites.current?.rows.find(row => row.id === id);
@@ -312,7 +317,7 @@ async function passivePrerequisites(tools) {
     return [id, { installed: true, installState: check.code === 0 ? 'ready' : 'unknown', version: check.output.match(/\d+\.\d+(?:\.\d+)?/)?.[0] ?? null }];
   })));
   const before = prerequisites.current;
-  const result = await scanPrerequisites({ ...presence, codex: presence.gpt, gpt: { source: prerequisiteSource } }, await preferences.get(), await projects.list());
+  const result = await scanPrerequisites({ ...presence, codex: presence.gpt, gpt: { source: prerequisiteSource } }, await preferences.get(), await projects.list(), projectId);
   for (const id of Object.keys(finders)) if (result.rows.some(row => row.id === id && row.state === 'ready') && before?.rows.find(row => row.id === id)?.state !== 'ready') {
     const connection = id === 'gpt' ? codex : id === 'grok' ? grok.connection : id === 'claude' ? claude : gemini;
     connection.cache = null; void refreshCatalog(id, true);
@@ -382,6 +387,7 @@ function notify(value) {
   if(!shuttingDown&&mainRevealed&&['auth','codex','claude','grok','gemini'].includes(value.type)&&value.state==='connected')
     void refreshCatalog(['auth','codex'].includes(value.type)?'gpt':value.type,true);
 }
+const requiredToolActions = new Set(['tower:check-work-tools','tower:start-workflow','tower:send-message','tower:answer-questions','tower:rerun-tests','tower:visual-retry','tower:generate-image','tower:revise-layout']);
 function handle(channel, action) {
   ipcMain.handle(channel, async (event, ...args) => {
     if (
@@ -392,9 +398,13 @@ function handle(channel, action) {
     )
       return { ok: false, error: "허용되지 않은 요청입니다." };
     try {
+      if (requiredToolActions.has(channel)) {
+        projects.find(await projects.list(), args[0]);
+        await requireTools(() => passivePrerequisites(undefined, args[0]));
+      }
       return { ok: true, value: await action(...args) };
     } catch (error) {
-      return { ok: false, error: publicError(error) };
+      return { ok: false, error: publicError(error), ...(error.code === 'PREREQUISITES_REQUIRED' ? { code: error.code, prerequisites: error.prerequisites } : {}) };
     }
   });
 }
@@ -774,6 +784,7 @@ else {
         })().finally(() => { prerequisiteScan = null; });
         return prerequisiteScan;
       });
+      handle('tower:check-work-tools', () => true);
       handle('tower:call-quota', () => quota.snapshot());
       handle('tower:visual-permission',async(id,runId,allow)=>{
         const state=await workflow.current(id,runId);if(!state?.visual)throw new Error('시안 비교 작업을 확인하세요.');
