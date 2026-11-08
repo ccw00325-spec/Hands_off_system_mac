@@ -2864,3 +2864,6 @@ body[data-sidebar="off"] .workbench-shell {
 .auth-recovery .action-row { display:flex; flex-wrap:wrap; gap:8px; }
 .auth-recovery button { min-height:34px; font-size:12px; }
 .desk-agent-history .auth-recovery { margin:0 0 12px; }
+
+.desk-agent-history .auth-recovery .action-row { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:6px; }
+.desk-agent-history .auth-recovery button { padding:6px 8px; font-size:11px; white-space:normal; }
